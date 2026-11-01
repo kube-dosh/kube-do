@@ -1,0 +1,35 @@
+global_defs {
+  router_id {{ inventory_hostname }}
+}
+
+vrrp_track_process chk_haproxy {
+  process haproxy
+  quorum 1
+  weight -30
+  delay 2
+}
+
+vrrp_instance KUBEDO_API {
+  state BACKUP
+  interface {{ kubedo_vip_interface }}
+  virtual_router_id {{ control_plane_vrrp_router_id }}
+  priority {{ kubedo_vrrp_priority }}
+  advert_int 1
+  authentication {
+    auth_type PASS
+    auth_pass {{ control_plane_vrrp_password }}
+  }
+  unicast_src_ip {{ kubedo_node_ip }}
+  unicast_peer {
+{% for node in control_plane_nodes if node.name != inventory_hostname %}
+    {{ node.address }}
+{% endfor %}
+  }
+  virtual_ipaddress {
+    {{ control_plane_vip }}/{{ kubedo_vip_prefix }} dev {{ kubedo_vip_interface }}
+  }
+  track_process {
+    chk_haproxy
+  }
+}
+

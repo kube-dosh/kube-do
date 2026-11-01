@@ -1,0 +1,180 @@
+---
+- name: Resolve containerd Artifacts
+  ansible.builtin.set_fact:
+    kubedo_containerd: "{{ binaries | selectattr('name', 'equalto', 'containerd') | first }}"
+    kubedo_runc: "{{ binaries | selectattr('name', 'equalto', 'runc') | first }}"
+    kubedo_cni_plugins: "{{ binaries | selectattr('name', 'equalto', 'cni-plugins') | first }}"
+    kubedo_crictl: "{{ binaries | selectattr('name', 'equalto', 'crictl') | first }}"
+    kubedo_pause_image: "{{ images | selectattr('name', 'equalto', 'pause') | first }}"
+
+- name: Create the Artifact download cache
+  ansible.builtin.file:
+    path: /var/cache/kubedo
+    state: directory
+    mode: '0755'
+
+- name: Download containerd
+  ansible.builtin.get_url:
+    url: "{{ kubedo_containerd.url }}"
+    dest: "/var/cache/kubedo/containerd-{{ kubedo_containerd.version }}.tar.gz"
+    checksum: "{{ ('sha256:' ~ kubedo_containerd.sha256) if kubedo_containerd.sha256 | default('') else omit }}"
+    mode: '0644'
+
+- name: Create the containerd staging directory
+  ansible.builtin.file:
+    path: "/var/cache/kubedo/containerd-{{ kubedo_containerd.version }}"
+    state: directory
+    mode: '0755'
+
+- name: Extract containerd
+  ansible.builtin.unarchive:
+    src: "/var/cache/kubedo/containerd-{{ kubedo_containerd.version }}.tar.gz"
+    dest: "/var/cache/kubedo/containerd-{{ kubedo_containerd.version }}"
+    remote_src: true
+    creates: "/var/cache/kubedo/containerd-{{ kubedo_containerd.version }}/bin/containerd"
+
+- name: Find extracted containerd binaries
+  ansible.builtin.find:
+    paths: "/var/cache/kubedo/containerd-{{ kubedo_containerd.version }}/bin"
+    file_type: file
+  register: kubedo_containerd_files
+
+- name: Install containerd binaries
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/usr/local/bin/{{ item.path | basename }}"
+    remote_src: true
+    mode: '0755'
+  loop: "{{ kubedo_containerd_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Download runc
+  ansible.builtin.get_url:
+    url: "{{ kubedo_runc.url }}"
+    dest: /usr/local/bin/runc
+    checksum: "{{ ('sha256:' ~ kubedo_runc.sha256) if kubedo_runc.sha256 | default('') else omit }}"
+    mode: '0755'
+
+- name: Download CNI plugins
+  ansible.builtin.get_url:
+    url: "{{ kubedo_cni_plugins.url }}"
+    dest: "/var/cache/kubedo/cni-plugins-{{ kubedo_cni_plugins.version }}.tgz"
+    checksum: "{{ ('sha256:' ~ kubedo_cni_plugins.sha256) if kubedo_cni_plugins.sha256 | default('') else omit }}"
+    mode: '0644'
+
+- name: Create the CNI plugin directory
+  ansible.builtin.file:
+    path: /opt/cni/bin
+    state: directory
+    mode: '0755'
+
+- name: Create the CNI plugins staging directory
+  ansible.builtin.file:
+    path: "/var/cache/kubedo/cni-plugins-{{ kubedo_cni_plugins.version }}"
+    state: directory
+    mode: '0755'
+
+- name: Extract CNI plugins
+  ansible.builtin.unarchive:
+    src: "/var/cache/kubedo/cni-plugins-{{ kubedo_cni_plugins.version }}.tgz"
+    dest: "/var/cache/kubedo/cni-plugins-{{ kubedo_cni_plugins.version }}"
+    remote_src: true
+    creates: "/var/cache/kubedo/cni-plugins-{{ kubedo_cni_plugins.version }}/loopback"
+
+- name: Find extracted CNI plugins
+  ansible.builtin.find:
+    paths: "/var/cache/kubedo/cni-plugins-{{ kubedo_cni_plugins.version }}"
+    file_type: file
+  register: kubedo_cni_plugin_files
+
+- name: Install CNI plugins
+  ansible.builtin.copy:
+    src: "{{ item.path }}"
+    dest: "/opt/cni/bin/{{ item.path | basename }}"
+    remote_src: true
+    mode: '0755'
+  loop: "{{ kubedo_cni_plugin_files.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+
+- name: Download crictl
+  ansible.builtin.get_url:
+    url: "{{ kubedo_crictl.url }}"
+    dest: "/var/cache/kubedo/crictl-{{ kubedo_crictl.version }}.tar.gz"
+    checksum: "{{ ('sha256:' ~ kubedo_crictl.sha256) if kubedo_crictl.sha256 | default('') else omit }}"
+    mode: '0644'
+
+- name: Create the crictl staging directory
+  ansible.builtin.file:
+    path: "/var/cache/kubedo/crictl-{{ kubedo_crictl.version }}"
+    state: directory
+    mode: '0755'
+
+- name: Extract crictl
+  ansible.builtin.unarchive:
+    src: "/var/cache/kubedo/crictl-{{ kubedo_crictl.version }}.tar.gz"
+    dest: "/var/cache/kubedo/crictl-{{ kubedo_crictl.version }}"
+    remote_src: true
+    creates: "/var/cache/kubedo/crictl-{{ kubedo_crictl.version }}/crictl"
+
+- name: Install crictl
+  ansible.builtin.copy:
+    src: "/var/cache/kubedo/crictl-{{ kubedo_crictl.version }}/crictl"
+    dest: /usr/local/bin/crictl
+    remote_src: true
+    mode: '0755'
+
+- name: Create containerd configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /etc/containerd
+    - /etc/containerd/certs.d
+    - "/etc/containerd/certs.d/{{ registry_address }}"
+    - /var/lib/containerd
+
+- name: Install the Registry CA for containerd
+  ansible.builtin.copy:
+    src: "{{ registry_ca_file }}"
+    dest: "/etc/containerd/certs.d/{{ registry_address }}/ca.crt"
+    mode: '0644'
+
+- name: Configure the private Registry host
+  ansible.builtin.template:
+    src: hosts.toml.j2
+    dest: "/etc/containerd/certs.d/{{ registry_address }}/hosts.toml"
+    mode: '0644'
+  notify: Restart containerd
+
+- name: Install containerd configuration
+  ansible.builtin.template:
+    src: config.toml.j2
+    dest: /etc/containerd/config.toml
+    mode: '0644'
+  notify: Restart containerd
+
+- name: Install the containerd systemd unit
+  ansible.builtin.template:
+    src: containerd.service.j2
+    dest: /etc/systemd/system/containerd.service
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart containerd
+
+- name: Install crictl configuration
+  ansible.builtin.template:
+    src: crictl.yaml.j2
+    dest: /etc/crictl.yaml
+    mode: '0644'
+
+- name: Enable and start containerd
+  ansible.builtin.systemd:
+    name: containerd
+    enabled: true
+    state: started
+    daemon_reload: true
+

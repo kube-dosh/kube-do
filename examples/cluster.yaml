@@ -1,0 +1,43 @@
+apiVersion: kubedo.io/v1alpha1
+kind: ClusterConfig
+metadata:
+  name: demo
+build: v1.36.5-kubedo.1
+platform:
+  osFamily: rhel
+  arch: amd64
+installer:
+  address: 10.0.0.10
+  downloadPort: 8080
+registry:
+  address: 10.0.0.10:5000
+  dataDir: /var/lib/kubedo/registry
+  tls:
+    mode: selfSigned
+ssh:
+  user: root
+  port: 22
+controlPlane:
+  vip: 10.0.0.100
+  apiPort: 16443
+  vrrp:
+    routerId: 51
+    password: kubedo
+  nodes:
+    - name: cp-1
+      address: 10.0.0.11
+    - name: cp-2
+      address: 10.0.0.12
+    - name: cp-3
+      address: 10.0.0.13
+workers:
+  - name: worker-1
+    address: 10.0.0.21
+  - name: worker-2
+    address: 10.0.0.22
+cni:
+  name: cilium
+  kubeProxyReplacement: true
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+  clusterDomain: cluster.local

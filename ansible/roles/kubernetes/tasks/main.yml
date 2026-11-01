@@ -1,0 +1,43 @@
+---
+- name: Resolve Kubernetes Artifacts
+  ansible.builtin.set_fact:
+    kubedo_kubeadm: "{{ binaries | selectattr('name', 'equalto', 'kubeadm') | first }}"
+    kubedo_kubelet: "{{ binaries | selectattr('name', 'equalto', 'kubelet') | first }}"
+    kubedo_kubectl: "{{ binaries | selectattr('name', 'equalto', 'kubectl') | first }}"
+
+- name: Install Kubernetes binaries
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "/usr/local/bin/{{ item.name }}"
+    checksum: "{{ ('sha256:' ~ item.sha256) if item.sha256 | default('') else omit }}"
+    mode: '0755'
+  loop:
+    - "{{ kubedo_kubeadm }}"
+    - "{{ kubedo_kubelet }}"
+    - "{{ kubedo_kubectl }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Create Kubernetes configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /etc/kubernetes
+    - /var/lib/kubelet
+    - /var/log/pods
+
+- name: Install the kubelet systemd unit
+  ansible.builtin.template:
+    src: kubelet.service.j2
+    dest: /etc/systemd/system/kubelet.service
+    mode: '0644'
+  notify: Reload kubelet units
+
+- name: Enable kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+    daemon_reload: true
+

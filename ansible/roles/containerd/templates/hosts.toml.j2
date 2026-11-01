@@ -1,0 +1,7 @@
+server = "https://{{ registry_address }}"
+
+[host."https://{{ registry_address }}"]
+  capabilities = ["pull", "resolve"]
+  skip_verify = false
+  ca = "/etc/containerd/certs.d/{{ registry_address }}/ca.crt"
+

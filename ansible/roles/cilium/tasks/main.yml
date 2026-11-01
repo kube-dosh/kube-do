@@ -1,0 +1,89 @@
+---
+- name: Resolve Cilium Artifacts
+  ansible.builtin.set_fact:
+    kubedo_helm: "{{ binaries | selectattr('name', 'equalto', 'helm') | first }}"
+    kubedo_cilium_chart: "{{ binaries | selectattr('name', 'equalto', 'cilium-chart') | first }}"
+    kubedo_cilium_image: "{{ images | selectattr('name', 'equalto', 'cilium') | first }}"
+    kubedo_operator_image: "{{ images | selectattr('name', 'equalto', 'cilium-operator') | first }}"
+    kubedo_envoy_image: "{{ images | selectattr('name', 'equalto', 'cilium-envoy') | first }}"
+    kubedo_relay_image: "{{ images | selectattr('name', 'equalto', 'hubble-relay') | first }}"
+    kubedo_certgen_image: "{{ images | selectattr('name', 'equalto', 'certgen') | first }}"
+
+- name: Create the Artifact cache
+  ansible.builtin.file:
+    path: /var/cache/kubedo
+    state: directory
+    mode: '0755'
+
+- name: Download Helm
+  ansible.builtin.get_url:
+    url: "{{ kubedo_helm.url }}"
+    dest: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}.tar.gz"
+    checksum: "{{ ('sha256:' ~ kubedo_helm.sha256) if kubedo_helm.sha256 | default('') else omit }}"
+    mode: '0644'
+
+- name: Create the Helm staging directory
+  ansible.builtin.file:
+    path: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}"
+    state: directory
+    mode: '0755'
+
+- name: Extract Helm
+  ansible.builtin.unarchive:
+    src: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}.tar.gz"
+    dest: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}"
+    remote_src: true
+    creates: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}/linux-{{ platform_arch }}/helm"
+
+- name: Install Helm
+  ansible.builtin.copy:
+    src: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}/linux-{{ platform_arch }}/helm"
+    dest: /usr/local/bin/helm
+    remote_src: true
+    mode: '0755'
+
+- name: Download the Cilium chart
+  ansible.builtin.get_url:
+    url: "{{ kubedo_cilium_chart.url }}"
+    dest: "/var/cache/kubedo/cilium-{{ kubedo_cilium_chart.version }}.tgz"
+    checksum: "{{ ('sha256:' ~ kubedo_cilium_chart.sha256) if kubedo_cilium_chart.sha256 | default('') else omit }}"
+    mode: '0644'
+
+- name: Render Cilium values
+  ansible.builtin.template:
+    src: values.yaml.j2
+    dest: /var/cache/kubedo/cilium-values.yaml
+    mode: '0600'
+
+- name: Install Cilium
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/helm
+      - upgrade
+      - --install
+      - cilium
+      - "/var/cache/kubedo/cilium-{{ kubedo_cilium_chart.version }}.tgz"
+      - --namespace
+      - kube-system
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --values
+      - /var/cache/kubedo/cilium-values.yaml
+      - --wait
+      - --timeout
+      - 15m
+
+- name: Wait for the Cilium DaemonSet
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - rollout
+      - status
+      - daemonset/cilium
+      - --timeout=10m
+  changed_when: false
+

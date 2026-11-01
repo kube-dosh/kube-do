@@ -1,0 +1,48 @@
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+timeouts:
+  controlPlaneComponentHealthCheck: 10m
+  etcdAPICall: 5m
+  kubeletHealthCheck: 10m
+  kubernetesAPICall: 5m
+localAPIEndpoint:
+  advertiseAddress: {{ kubedo_node_ip }}
+  bindPort: 6443
+nodeRegistration:
+  name: {{ inventory_hostname }}
+  criSocket: unix:///run/containerd/containerd.sock
+  imagePullPolicy: IfNotPresent
+  kubeletExtraArgs:
+    - name: node-ip
+      value: {{ kubedo_node_ip }}
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+clusterName: {{ cluster_name }}
+kubernetesVersion: {{ kubernetes_version }}
+controlPlaneEndpoint: {{ control_plane_address }}
+imageRepository: {{ registry_address }}/{{ registry_namespace }}
+networking:
+  podSubnet: {{ pod_cidr }}
+  serviceSubnet: {{ service_cidr }}
+  dnsDomain: {{ cluster_domain }}
+apiServer:
+  certSANs:
+    - {{ control_plane_vip }}
+{% for node in control_plane_nodes %}
+    - {{ node.name }}
+    - {{ node.address }}
+{% endfor %}
+dns:
+  imageRepository: {{ registry_address }}/{{ registry_namespace }}/coredns
+  imageTag: {{ kubedo_coredns_image.tag }}
+etcd:
+  local:
+    imageRepository: {{ registry_address }}/{{ registry_namespace }}
+    imageTag: {{ kubedo_etcd_image.tag }}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+failSwapOn: true
+

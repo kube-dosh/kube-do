@@ -1,0 +1,50 @@
+---
+- name: Check whether this node has already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubedo_kubelet_conf
+
+- name: Assert that the first control-plane node published join data
+  ansible.builtin.assert:
+    that:
+      - hostvars[groups['control_plane'][0]].kubeadm_join_command is defined
+      - hostvars[groups['control_plane'][0]].kubeadm_certificate_key is defined
+    fail_msg: "The kubeadm init role did not publish join data"
+  when: not kubedo_kubelet_conf.stat.exists
+
+- name: Join a control-plane node
+  ansible.builtin.command:
+    argv:
+      - /bin/sh
+      - -c
+      - >-
+        {{ hostvars[groups['control_plane'][0]].kubeadm_join_command.stdout }}
+        --control-plane
+        --certificate-key {{ hostvars[groups['control_plane'][0]].kubeadm_certificate_key }}
+        --cri-socket unix:///run/containerd/containerd.sock
+        --apiserver-advertise-address {{ kubedo_node_ip }}
+        --node-name {{ inventory_hostname }}
+  when:
+    - not kubedo_kubelet_conf.stat.exists
+    - join_control_plane | bool
+
+- name: Join a worker node
+  ansible.builtin.command:
+    argv:
+      - /bin/sh
+      - -c
+      - >-
+        {{ hostvars[groups['control_plane'][0]].kubeadm_join_command.stdout }}
+        --cri-socket unix:///run/containerd/containerd.sock
+        --node-name {{ inventory_hostname }}
+  when:
+    - not kubedo_kubelet_conf.stat.exists
+    - not join_control_plane | bool
+
+- name: Ensure kubelet is running after join
+  ansible.builtin.systemd:
+    name: kubelet
+    state: started
+    enabled: true
+    daemon_reload: true
+

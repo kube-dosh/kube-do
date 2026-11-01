@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+namespace=kubedo
+container=haproxy
+image={{ kubedo_haproxy_image.target | quote }}
+
+mkdir -p /run/haproxy /var/log/kubedo
+
+ctr --namespace "$namespace" task delete --force "$container" >/dev/null 2>&1 || true
+ctr --namespace "$namespace" containers delete "$container" >/dev/null 2>&1 || true
+
+ctr --namespace "$namespace" images pull \
+  --hosts-dir /etc/containerd/certs.d \
+  "$image"
+
+ctr --namespace "$namespace" run --detach \
+  --log-uri file:///var/log/kubedo/haproxy.log \
+  --rlimit-nofile 1048576:1048576 \
+  --net-host \
+  --with-ns pid:/proc/1/ns/pid \
+  --mount type=bind,src=/etc/haproxy,dst=/etc/haproxy,options=rbind:ro \
+  --mount type=bind,src=/run/haproxy,dst=/run/haproxy,options=rbind \
+  "$image" "$container" \
+  /usr/local/sbin/haproxy -Ws \
+  -f /etc/haproxy/haproxy.cfg \
+  -p /run/haproxy/haproxy.pid
+
+while ctr --namespace "$namespace" tasks ps "$container" >/dev/null 2>&1; do
+  sleep 2
+done
+exit 1

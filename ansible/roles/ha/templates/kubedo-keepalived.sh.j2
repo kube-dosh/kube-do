@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+namespace=kubedo
+container=keepalived
+image={{ kubedo_keepalived_image.target | quote }}
+
+mkdir -p /run/keepalived /var/log/kubedo
+
+ctr --namespace "$namespace" task delete --force "$container" >/dev/null 2>&1 || true
+ctr --namespace "$namespace" containers delete "$container" >/dev/null 2>&1 || true
+
+ctr --namespace "$namespace" images pull \
+  --hosts-dir /etc/containerd/certs.d \
+  "$image"
+
+ctr --namespace "$namespace" run --detach \
+  --log-uri file:///var/log/kubedo/keepalived.log \
+  --net-host \
+  --with-ns pid:/proc/1/ns/pid \
+  --cap-add CAP_NET_ADMIN \
+  --cap-add CAP_NET_RAW \
+  --cap-add CAP_NET_BROADCAST \
+  --mount type=bind,src=/etc/keepalived,dst=/etc/keepalived,options=rbind:ro \
+  --mount type=bind,src=/run/keepalived,dst=/run/keepalived,options=rbind \
+  "$image" "$container" \
+  /usr/local/sbin/keepalived --dont-fork --log-console \
+  -f /etc/keepalived/keepalived.conf \
+  -p /run/keepalived/keepalived.pid
+
+while ctr --namespace "$namespace" tasks ps "$container" >/dev/null 2>&1; do
+  sleep 2
+done
+exit 1

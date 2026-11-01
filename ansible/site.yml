@@ -1,0 +1,65 @@
+---
+- name: Prepare every Kubernetes node
+  hosts: k8s_cluster
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: prerequisites
+      tags: [prerequisites]
+    - role: containerd
+      tags: [containerd]
+    - role: kubernetes
+      tags: [kubernetes]
+
+- name: Configure the control-plane VIP and API load balancer
+  hosts: control_plane
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: ha
+      tags: [ha]
+
+- name: Initialize the first control-plane node
+  hosts: control_plane[0]
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: kubeadm_init
+      tags: [init]
+
+- name: Join the remaining control-plane nodes
+  hosts: control_plane[1:]
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: kubeadm_join
+      vars:
+        join_control_plane: true
+      tags: [join, join-control-plane]
+
+- name: Join worker nodes
+  hosts: workers
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: kubeadm_join
+      vars:
+        join_control_plane: false
+      tags: [join, join-workers]
+
+- name: Install Cilium
+  hosts: control_plane[0]
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: cilium
+      tags: [cilium]
+
+- name: Verify the cluster
+  hosts: control_plane[0]
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: verify
+      tags: [verify]
+

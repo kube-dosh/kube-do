@@ -1,0 +1,23 @@
+[Unit]
+Description=kubedo HAProxy API load balancer container
+After=network-online.target containerd.service
+Wants=network-online.target containerd.service
+Requires=containerd.service
+
+[Service]
+Type=simple
+RuntimeDirectory=haproxy
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/libexec/kubedo-haproxy
+ExecStop=-/usr/local/bin/ctr --namespace kubedo task kill --signal TERM haproxy
+ExecStopPost=-/usr/local/bin/ctr --namespace kubedo task delete --force haproxy
+ExecStopPost=-/usr/local/bin/ctr --namespace kubedo containers delete haproxy
+Restart=always
+RestartSec=3
+TimeoutStartSec=120
+TimeoutStopSec=20
+KillMode=process
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

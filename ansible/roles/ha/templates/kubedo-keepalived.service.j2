@@ -1,0 +1,22 @@
+[Unit]
+Description=kubedo keepalived VRRP container
+After=network-online.target containerd.service kubedo-haproxy.service
+Wants=network-online.target containerd.service kubedo-haproxy.service
+Requires=containerd.service
+
+[Service]
+Type=simple
+RuntimeDirectory=keepalived
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/libexec/kubedo-keepalived
+ExecStop=-/usr/local/bin/ctr --namespace kubedo task kill --signal TERM keepalived
+ExecStopPost=-/usr/local/bin/ctr --namespace kubedo task delete --force keepalived
+ExecStopPost=-/usr/local/bin/ctr --namespace kubedo containers delete keepalived
+Restart=always
+RestartSec=3
+TimeoutStartSec=120
+TimeoutStopSec=20
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

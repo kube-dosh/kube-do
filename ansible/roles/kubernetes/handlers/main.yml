@@ -1,0 +1,5 @@
+---
+- name: Reload kubelet units
+  ansible.builtin.systemd:
+    daemon_reload: true
+

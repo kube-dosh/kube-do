@@ -1,0 +1,16 @@
+---
+- name: Reload HA units
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart HAProxy
+  ansible.builtin.systemd:
+    name: kubedo-haproxy
+    state: restarted
+
+- name: Restart keepalived
+  ansible.builtin.systemd:
+    name: kubedo-keepalived
+    state: restarted
+    daemon_reload: true
+

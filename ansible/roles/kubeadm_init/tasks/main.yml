@@ -1,0 +1,103 @@
+---
+- name: Resolve control-plane image metadata
+  ansible.builtin.set_fact:
+    kubedo_etcd_image: "{{ images | selectattr('name', 'equalto', 'etcd') | first }}"
+    kubedo_coredns_image: "{{ images | selectattr('name', 'equalto', 'coredns') | first }}"
+
+- name: Check whether this control-plane node is initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubedo_admin_conf
+
+- name: Install the kubeadm InitConfiguration
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /etc/kubernetes/kubeadm-config.yaml
+    mode: '0600'
+
+- name: Validate the kubeadm InitConfiguration
+  ansible.builtin.command: /usr/local/bin/kubeadm config validate --config /etc/kubernetes/kubeadm-config.yaml
+  changed_when: false
+
+- name: Initialize the first control-plane node
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubeadm
+      - init
+      - --config
+      - /etc/kubernetes/kubeadm-config.yaml
+      - --skip-phases=addon/kube-proxy
+      - --upload-certs
+  when: not kubedo_admin_conf.stat.exists
+  register: kubedo_kubeadm_init
+
+- name: Create the root kubeconfig directory
+  ansible.builtin.file:
+    path: /root/.kube
+    state: directory
+    mode: '0700'
+
+- name: Create the root kubeconfig
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /root/.kube/config
+    remote_src: true
+    mode: '0600'
+
+- name: Read the host DNS resolvers
+  ansible.builtin.command: awk '$1 == "nameserver" { print $2 }' /etc/resolv.conf
+  register: kubedo_host_nameservers
+  changed_when: false
+
+- name: Record usable CoreDNS upstream resolvers
+  ansible.builtin.set_fact:
+    kubedo_coredns_upstreams: "{{ kubedo_host_nameservers.stdout_lines | reject('equalto', '127.0.0.1') | reject('equalto', '::1') | list }}"
+
+- name: Install the CoreDNS Corefile
+  ansible.builtin.template:
+    src: coredns-corefile.j2
+    dest: /etc/kubernetes/coredns-corefile
+    mode: '0600'
+
+- name: Apply the CoreDNS Corefile
+  ansible.builtin.shell: >-
+    /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf
+    --namespace kube-system create configmap coredns
+    --from-file=Corefile=/etc/kubernetes/coredns-corefile
+    --dry-run=client -o yaml |
+    /usr/local/bin/kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -
+  register: kubedo_coredns_apply
+  changed_when: "' configured' in kubedo_coredns_apply.stdout or ' created' in kubedo_coredns_apply.stdout"
+
+- name: Restart CoreDNS after changing its configuration
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - rollout
+      - restart
+      - deployment/coredns
+  when: kubedo_coredns_apply is changed
+
+- name: Create a worker join command
+  ansible.builtin.command: /usr/local/bin/kubeadm token create --print-join-command
+  register: kubeadm_join_command
+  changed_when: false
+
+- name: Upload control-plane certificates for joining nodes
+  ansible.builtin.command: /usr/local/bin/kubeadm init phase upload-certs --upload-certs
+  register: kubedo_upload_certs
+  changed_when: false
+
+- name: Record the certificate key for control-plane joins
+  ansible.builtin.set_fact:
+    kubeadm_certificate_key: "{{ kubedo_upload_certs.stdout_lines | last | trim }}"
+
+- name: Show the worker join command
+  ansible.builtin.debug:
+    var: kubeadm_join_command.stdout
+    verbosity: 1
+

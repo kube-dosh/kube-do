@@ -1,0 +1,25 @@
+.:53 {
+    errors
+    health {
+       lameduck 5s
+    }
+    ready
+    kubernetes {{ cluster_domain }} in-addr.arpa ip6.arpa {
+       pods insecure
+       fallthrough in-addr.arpa ip6.arpa
+       ttl 30
+    }
+    prometheus :9153
+{% if kubedo_coredns_upstreams | length > 0 %}
+    forward . {{ kubedo_coredns_upstreams | join(' ') }} {
+       max_concurrent 1000
+    }
+{% endif %}
+    cache 30 {
+       disable success {{ cluster_domain }}
+       disable denial {{ cluster_domain }}
+    }
+    loop
+    reload
+    loadbalance
+}
