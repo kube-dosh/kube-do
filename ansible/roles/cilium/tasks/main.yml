@@ -55,6 +55,185 @@
     dest: /var/cache/kubedo/cilium-values.yaml
     mode: '0600'
 
+- name: Wait for the Kubernetes API before installing Cilium
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --request-timeout=10s
+      - get
+      - --raw=/readyz
+  register: kubedo_cilium_api_ready
+  changed_when: false
+  retries: 120
+  delay: 5
+  until: kubedo_cilium_api_ready.rc == 0
+
+- name: Inspect the existing Cilium Helm release
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/helm
+      - status
+      - cilium
+      - --namespace
+      - kube-system
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --output
+      - json
+  register: kubedo_cilium_release
+  changed_when: false
+  failed_when: false
+
+- name: Assert the Cilium release inspection was conclusive
+  ansible.builtin.assert:
+    that:
+      - >-
+        kubedo_cilium_release.rc == 0 or
+        'release: not found' in kubedo_cilium_release.stderr
+    fail_msg: >-
+      failed to inspect the existing Cilium Helm release; refusing to treat an
+      uncertain result as an absent release:
+      {{ kubedo_cilium_release.stderr | trim }}
+
+- name: Record the existing Cilium Helm release status
+  ansible.builtin.set_fact:
+    kubedo_cilium_release_status: "{{ ((kubedo_cilium_release.stdout | from_json).info.status) if kubedo_cilium_release.rc == 0 else 'absent' }}"
+
+- name: Remove an incomplete Cilium Helm release
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/helm
+      - uninstall
+      - cilium
+      - --namespace
+      - kube-system
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --timeout
+      - 5m
+  when:
+    - kubedo_cilium_release.rc == 0
+    - kubedo_cilium_release_status not in ['deployed', 'uninstalled', 'uninstalling']
+
+- name: Wait for the incomplete Cilium Helm release to be removed
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/helm
+      - status
+      - cilium
+      - --namespace
+      - kube-system
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+  register: kubedo_cilium_release_wait
+  changed_when: false
+  failed_when: false
+  retries: 120
+  delay: 5
+  until: kubedo_cilium_release_wait.rc != 0
+  when:
+    - kubedo_cilium_release.rc == 0
+    - kubedo_cilium_release_status not in ['deployed', 'uninstalled']
+
+- name: Re-inspect the Cilium Helm release before installation
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/helm
+      - status
+      - cilium
+      - --namespace
+      - kube-system
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+  register: kubedo_cilium_release_after_cleanup
+  changed_when: false
+  failed_when: false
+
+- name: Assert the Cilium release re-inspection was conclusive
+  ansible.builtin.assert:
+    that:
+      - >-
+        kubedo_cilium_release_after_cleanup.rc == 0 or
+        'release: not found' in kubedo_cilium_release_after_cleanup.stderr
+    fail_msg: >-
+      failed to re-inspect the Cilium Helm release:
+      {{ kubedo_cilium_release_after_cleanup.stderr | trim }}
+
+- name: Inspect the Cilium secrets namespace
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - get
+      - namespace
+      - cilium-secrets
+      - --output
+      - json
+  register: kubedo_cilium_namespace
+  changed_when: false
+  failed_when: false
+
+- name: Assert the Cilium secrets namespace inspection was conclusive
+  ansible.builtin.assert:
+    that:
+      - kubedo_cilium_namespace.rc == 0 or 'not found' in kubedo_cilium_namespace.stderr
+    fail_msg: >-
+      failed to inspect the cilium-secrets namespace:
+      {{ kubedo_cilium_namespace.stderr | trim }}
+
+- name: Initialize Cilium namespace cleanup state
+  ansible.builtin.set_fact:
+    kubedo_cilium_namespace_cleanup: false
+    kubedo_cilium_namespace_orphaned: false
+
+- name: Detect a terminating Cilium secrets namespace
+  ansible.builtin.set_fact:
+    kubedo_cilium_namespace_cleanup: true
+  when:
+    - kubedo_cilium_namespace.rc == 0
+    - (kubedo_cilium_namespace.stdout | from_json).metadata.get('deletionTimestamp') is not none
+
+- name: Detect an orphaned Cilium secrets namespace
+  ansible.builtin.set_fact:
+    kubedo_cilium_namespace_cleanup: true
+    kubedo_cilium_namespace_orphaned: true
+  when:
+    - kubedo_cilium_namespace.rc == 0
+    - (kubedo_cilium_namespace.stdout | from_json).metadata.get('deletionTimestamp') is none
+    - kubedo_cilium_release_after_cleanup.rc != 0
+
+- name: Delete an orphaned Cilium secrets namespace
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - delete
+      - namespace
+      - cilium-secrets
+      - --wait=false
+  when: kubedo_cilium_namespace_orphaned
+
+- name: Wait for the Cilium secrets namespace to be removed
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - get
+      - namespace
+      - cilium-secrets
+  register: kubedo_cilium_namespace_wait
+  changed_when: false
+  failed_when: false
+  retries: 120
+  delay: 5
+  until: kubedo_cilium_namespace_wait.rc != 0
+  when: kubedo_cilium_namespace_cleanup
+
 - name: Install Cilium
   ansible.builtin.command:
     argv:
@@ -69,6 +248,7 @@
       - /etc/kubernetes/admin.conf
       - --values
       - /var/cache/kubedo/cilium-values.yaml
+      - --atomic
       - --wait
       - --timeout
       - 15m

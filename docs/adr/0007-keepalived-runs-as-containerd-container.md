@@ -1,6 +1,6 @@
 # HAProxy 与 keepalived 在 kubeadm 前以容器运行
 
-HAProxy 与 keepalived 必须在 kubeadm 初始化之前提供 API 入口和 Control Plane VIP，因此不能作为 Kubernetes DaemonSet 运行。kubedo 在 `kubedo download` 的镜像阶段，把 Installer Host 上已构建并校验的 HAProxy/keepalived 二进制、`ldd` 收集的动态库、动态加载器和最小 glibc 配置文件分别组装成单架构镜像，推送到私有 Registry；目标节点通过已有 containerd 拉取镜像，由 `kubedo-haproxy.service` 和 `kubedo-keepalived.service` 调用 `ctr` 启动容器。
+HAProxy 与 keepalived 必须在 kubeadm 初始化之前提供 API 入口和 Control Plane VIP，因此不能作为 Kubernetes DaemonSet 运行。kubedo 在 `kubedo download` 的镜像阶段，把 Installer Host 上已构建并校验的 HAProxy/keepalived 二进制、`ldd` 收集的动态库、动态加载器和最小 glibc 配置文件分别组装成单架构镜像，并额外打入 glibc 在 `pthread_exit` 时运行期加载、不会出现在 `ldd` 输出中的 `libgcc_s.so.1`，再推送到私有 Registry；目标节点通过已有 containerd 拉取镜像，由 `kubedo-haproxy.service` 和 `kubedo-keepalived.service` 调用 `ctr` 启动容器。
 
 两个容器都使用 hostNetwork 和 hostPID。hostNetwork 让 HAProxy 直接监听节点 API 入口端口，并让 VRRP 与 VIP 直接作用于节点网络；hostPID 让 keepalived 的 `vrrp_track_process` 能看到容器中的 HAProxy 进程。HAProxy 不需要额外 capability；keepalived 只增加 `CAP_NET_ADMIN`、`CAP_NET_RAW`、`CAP_NET_BROADCAST`。`/etc/haproxy` 与 `/etc/keepalived` 只读挂载，`/run/haproxy` 与 `/run/keepalived` 可写挂载。systemd 负责开机启动、重启、停止和清理容器，`RuntimeDirectory` 保证节点重启后 tmpfs 目录仍存在。角色会停止并禁用旧的宿主 `haproxy.service`/`keepalived.service`，删除 `/usr/local/sbin/haproxy`、`/usr/local/sbin/keepalived` 与旧 unit。
 

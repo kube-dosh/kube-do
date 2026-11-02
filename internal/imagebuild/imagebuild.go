@@ -125,7 +125,39 @@ func DiscoverLibraries(binaryPath string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("inspect dependencies of %s: %w", binaryPath, err)
 	}
+	libraries = mergeLibraries(libraries,
+		"/lib64/libgcc_s.so.1",
+		"/usr/lib64/libgcc_s.so.1",
+		"/lib/libgcc_s.so.1",
+		"/usr/lib/libgcc_s.so.1",
+	)
 	return libraries, nil
+}
+
+// mergeLibraries adds existing runtime libraries that are loaded dynamically
+// rather than reported by ldd. glibc's pthread_exit loads libgcc_s.so.1 at
+// runtime for unwinding; without it threaded programs abort inside the image.
+func mergeLibraries(libraries []string, candidates ...string) []string {
+	seen := make(map[string]bool, len(libraries)+len(candidates))
+	merged := make([]string, 0, len(libraries)+len(candidates))
+	add := func(path string) {
+		if seen[path] {
+			return
+		}
+		seen[path] = true
+		merged = append(merged, path)
+	}
+	for _, library := range libraries {
+		add(library)
+	}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && info.Mode().IsRegular() {
+			add(candidate)
+		}
+	}
+	sort.Strings(merged)
+	return merged
 }
 
 func parseLdd(output string) ([]string, error) {

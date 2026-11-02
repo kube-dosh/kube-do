@@ -2,7 +2,7 @@
 
 kubedo 是一个面向离线（air-gapped）环境的 Kubernetes 安装工程：Go 编写的 `kubedo` 负责准备、版本化和分发安装资源，Ansible 负责目标节点与集群内编排。
 
-> **发布状态：开发版，尚未达到生产发布标准。** Resource Manifest、资源下载与校验、HTTPS Registry、Download Server、Ansible 渲染及全部安装角色均已实现。2026-10-24 已从**空白 Rocky Linux 9.8 / amd64 cloud image** 重建目标节点并完成无公网端到端安装：目标机初始没有 `/etc/resolv.conf`、SELinux 为 `Enforcing`，安装后 3 Control Plane + 1 Worker 全部 `Ready`，Cilium kube-proxy replacement、CoreDNS 与 Hubble Relay 就绪；VIP 主动切主/恢复、整机重启后的 SELinux 持久禁用与集群恢复也已验证。2026-10-25 又在**空白 Debian 12 / amd64 cloud image** 上完成同类端到端安装，并补齐 Debian 12/13、Ubuntu 22.04/24.04 与 arm64 的资源清单、CLI 和 Ansible 支持。2026-10-26 将 keepalived 改为由 systemd 托管的 containerd 容器，并完成镜像构建、VIP 故障切换和节点重启回归；2026-11-01 进一步将 HAProxy 切换为相同的 Installer 镜像与 containerd 容器模型，HAProxy 容器化的端到端回归仍待执行。Debian 13、Ubuntu 22.04/24.04 与 arm64 的端到端安装仍待验证。**尚未在真实 RHEL 9 物理机、复杂网络和长期运行场景中验证**。本版只面向全新安装，不执行集群升级或节点扩容。
+> **发布状态：开发版，尚未达到生产发布标准。** Resource Manifest、资源下载与校验、HTTPS Registry、Download Server、Ansible 渲染及全部安装角色均已实现。2026-10-24 已从**空白 Rocky Linux 9.8 / amd64 cloud image** 重建目标节点并完成无公网端到端安装：目标机初始没有 `/etc/resolv.conf`、SELinux 为 `Enforcing`，安装后 3 Control Plane + 1 Worker 全部 `Ready`，Cilium kube-proxy replacement、CoreDNS 与 Hubble Relay 就绪；VIP 主动切主/恢复、整机重启后的 SELinux 持久禁用与集群恢复也已验证。2026-10-25 又在**空白 Debian 12 / amd64 cloud image** 上完成同类端到端安装，并补齐 Debian 12/13、Ubuntu 22.04/24.04 与 arm64 的资源清单、CLI 和 Ansible 支持。2026-10-26 将 keepalived 改为由 systemd 托管的 containerd 容器，并完成镜像构建、VIP 故障切换和节点重启回归；2026-11-01 进一步将 HAProxy 切换为相同的 Installer 镜像与 containerd 容器模型；2026-11-02 在 Fedora 44 的 3 Control Plane + 5 Worker libvirt 环境中完成容器化 HAProxy、Cilium、CoreDNS 与 Hubble Relay 端到端部署，并针对运行期动态库、systemd-resolved DNS 和 Helm 残留状态补齐恢复逻辑。Debian 13、Ubuntu 22.04/24.04 与 arm64 的端到端安装仍待验证。**尚未在真实 RHEL 9 物理机、复杂网络和长期运行场景中验证**。本版只面向全新安装，不执行集群升级或节点扩容。
 
 术语见 [GLOSSARY.md](./GLOSSARY.md)，架构取舍见 [docs/adr](./docs/adr/)。
 
@@ -12,7 +12,7 @@ kubedo 是一个面向离线（air-gapped）环境的 Kubernetes 安装工程：
 - **资源版本化**：以 **Build** 为单位同时钉住 Kubernetes、二进制、Helm chart 与容器镜像；切换 Build 即切换整套资源。
 - **单一配置入口**：用户只维护 `cluster.yaml`；inventory 与 group_vars 由 `kubedo` 生成，不写入版本库。
 - **职责分离**：kubedo 处理集群外资源与命令编排，Ansible 处理主机前置配置、kubeadm、HA、etcd 与 Cilium。
-- **支持平台**：目标节点支持 RHEL 系 9、Debian 12/13、Ubuntu 22.04/24.04，CPU 架构支持 `amd64` 与 `arm64`；同一 Build 可同时携带两个架构的资源。
+- **支持平台**：目标节点支持 RHEL 系 9、Fedora 44（Installer Host 与目标节点均须为 Fedora 44）、Debian 12/13、Ubuntu 22.04/24.04，CPU 架构支持 `amd64` 与 `arm64`；同一 Build 可同时携带两个架构的资源。
 - **显式选平台**：`cluster.yaml` 的 `platform.osFamily` 与 `platform.arch` 决定渲染到 Ansible 的二进制、Helm 归档路径与前置校验；目标节点实际发行版或架构不匹配时安装会立即失败。
 - **构建 ABI**：HAProxy 与 keepalived 都在 Installer Host 上从固定源码原生构建，并分别连同运行库打包成按架构区分的 Installer 镜像。两者都不作为宿主机二进制分发，目标节点只拉取对应镜像。Installer Host 的架构必须与目标一致，glibc 不得新于目标节点；本版不做交叉编译。
 - **本版范围**：全新安装、资源版本化与 Build 生成；**不包含**原地升级、节点扩容、Registry 认证，以及基于 scp 的内置分发路径。
@@ -86,9 +86,9 @@ kubedo 是一个面向离线（air-gapped）环境的 Kubernetes 安装工程：
 - 可访问公网，能访问上游二进制、Helm chart 与镜像仓库。
 - 以 `root` 执行部署命令（Registry 的 systemd 部署、节点安装均需要 root 权限）。
 - 已安装并可从 `PATH` 调用 `ansible-playbook`；当前使用 Rocky Linux 9 AppStream 提供的 ansible-core 2.14.18 验证。
-- 构建 HAProxy 与 keepalived 需要 `gcc`、`make`、`pkg-config`、OpenSSL 开发头文件与可用的 C 工具链；keepalived 的 VRRP 认证需要 OpenSSL EVP 头文件。组装两个 HA 镜像都需要 `ldd` 来收集动态库。RHEL 系通常安装 `openssl-devel`，Debian 系通常安装 `libssl-dev`；kubedo 不会自动安装这些构建依赖。
+- 构建 HAProxy 与 keepalived 需要 `gcc`、`make`、`pkg-config`、OpenSSL 开发头文件与可用的 C 工具链；keepalived 的 VRRP 认证需要 OpenSSL EVP 头文件。组装两个 HA 镜像时使用 `ldd` 收集直接动态库，并额外打入 glibc 在 `pthread_exit` 时动态加载的 `libgcc_s.so.1`。RHEL 系通常安装 `openssl-devel`，Debian 系通常安装 `libssl-dev`；kubedo 不会自动安装这些构建依赖。
 - Installer Host 的 CPU 架构必须与 `cluster.yaml` 的 `platform.arch` 一致（`x86_64` 对应 `amd64`，`aarch64` 对应 `arm64`）。`kubedo download` 与 `kubedo registry` 在架构不一致时会直接失败，避免把本机架构的 HAProxy/keepalived 镜像或 Registry 二进制误发给目标节点。
-- HAProxy/keepalived 必须在 **glibc 不新于目标节点** 的环境中原生构建。RHEL 目标应在 RHEL 系 9 兼容环境构建；Debian/Ubuntu 目标应在对应或更老的 Debian 系环境构建。不要用 Fedora 等更新 glibc 的环境构建。
+- HAProxy/keepalived 必须在 **glibc 不新于目标节点** 的环境中原生构建。RHEL 目标应在 RHEL 系 9 兼容环境构建；Debian/Ubuntu 目标应在对应或更老的 Debian 系环境构建；Fedora 44 目标只能使用 Fedora 44 Installer Host 构建，不能把 Fedora 44 产物分发到 RHEL 9 目标。
 - `kubedo download` 能比较 `GOOS`/`GOARCH`、校验源码与产物 SHA-256，但无法检测 glibc 符号版本不兼容。在更新版构建机上产出的 HAProxy 或 keepalived 镜像可能在目标节点报 `GLIBC_x.y not found`。
 - `kubedo` CLI 本身使用 `CGO_ENABLED=0` 构建为静态二进制，避免安装机/构建机的 glibc 差异影响命令执行。
 - 能通过 SSH 访问所有 Control Plane 与 Worker；推荐使用密钥认证。
@@ -98,11 +98,12 @@ kubedo 是一个面向离线（air-gapped）环境的 Kubernetes 安装工程：
 
 ### 目标节点
 
-- 支持 RHEL 系 9、Debian 12/13、Ubuntu 22.04/24.04；架构支持 `x86_64`/`amd64` 与 `aarch64`/`arm64`。Ansible 会同时校验发行版、主版本和 CPU 架构，必须与 `cluster.yaml` 的 `platform` 一致。
+- 支持 RHEL 系 9、Fedora 44、Debian 12/13、Ubuntu 22.04/24.04；架构支持 `x86_64`/`amd64` 与 `aarch64`/`arm64`。Ansible 会同时校验发行版、主版本和 CPU 架构，必须与 `cluster.yaml` 的 `platform` 一致。
+- 根文件系统至少需要 20 GiB 总容量和 5 GiB 可用空间；Control Plane 推荐至少 50 GiB 磁盘（文件系统约 49 GiB 可用）。前置检查会在容量不足时立即失败，低于推荐值时输出警告。虚拟化环境的 qcow2 应放在 SSD/NVMe 或低延迟存储上，机械盘 RAID 会导致 etcd fsync 延迟、leader 抖动和 API 超时。
 - `root` SSH 可登录。Debian/Ubuntu 目标需预先具备 Python 3 供 Ansible 连接；本项目不从 apt 安装 Python 或任何 Kubernetes/运行时组件。
 - 不要求预装 Docker，也不从 OS 仓库安装 Kubernetes、containerd、runc 等组件。
 - 基础系统需提供 Python 3、`ip`、`pgrep`、`mount`、`cp`、`modprobe`、`sysctl`、`swapoff`、`sha256sum`、`tar`、`gzip` 与 `systemctl` 等命令；RHEL 还需要 `getenforce`/`setenforce`。kubedo 不补装 OS 包，缺失会在对应阶段直接失败。
-- 不要求节点配置可用的上游 DNS。若镜像没有 `/etc/resolv.conf`，前置阶段会创建一份**不含 nameserver** 的占位文件且不覆盖已有配置，使 kubelet 能创建 Pod sandbox；Ansible 随后读取其中的非 loopback nameserver 渲染 CoreDNS，没有上游时省略 `forward` 插件，集群内 DNS 仍可正常工作。
+- 不要求节点配置可用的上游 DNS。若镜像没有 `/etc/resolv.conf`，前置阶段会创建一份**不含 nameserver** 的占位文件且不覆盖已有配置，使 kubelet 能创建 Pod sandbox；Ansible 随后读取其中的非 loopback nameserver，并在 resolv.conf 只有 systemd-resolved stub 时从 `resolvectl dns` 提取真实上游。没有上游时省略 `forward` 和 `loop` 插件，集群内 DNS 仍可正常工作。
 - Ansible 会关闭并禁用 RHEL 的 firewalld 或 Debian 系的 ufw，并完整关闭 swap：停止当前 swap、注释 `/etc/fstab` 中的 swap 条目、停止并屏蔽 systemd `.swap` unit，同时停止、禁用并屏蔽 `zram-generator`、`zram-tools`、`zram-config` 等 zram 服务；zram-generator 的全局配置会被替换为禁用配置。安装后会断言 `/proc/swaps` 为空、fstab 无活动 swap 条目且相关 systemd unit 均已屏蔽。RHEL 系会把 SELinux 设置为 `disabled`（当前启动先切换为 permissive）；Debian 系没有 SELinux 步骤。
 - 所有节点需要访问安装机的 TCP `8080`（二进制）与 `5000`（镜像），并能访问 `<VIP>:<apiPort>`（默认 `16443`，用于加入集群和 kubelet 连接 API）。Control Plane 还需要本机 TCP `6443`（kube-apiserver）与 HAProxy 前端端口 `16443`；keepalived 之间还需要 VRRP（IP 协议 `112`）。
 - **自动化不会重启任何节点**。SELinux 的持久化配置在下次启动才完全生效；需要合规时请在安装前完成必要的重启窗口。
@@ -134,7 +135,7 @@ sudo ./kubedo download \
 
 该命令只下载 `cluster.yaml` 目标平台的节点二进制与 Installer Host 二进制，并在本机从固定源码构建 HAProxy/keepalived。下载结果带原子写入与上游 SHA-256 校验；普通二进制在内容校验通过后跳过。构建型二进制只有在产物、`.sha256` sidecar 和 build marker 三者一致时才复用，缺少 sidecar 或来源发生变化会重新构建。HAProxy 与 keepalived 的产物只作为 Installer 镜像内容，不通过 Download Server 分发到目标节点。
 
-HAProxy 与 keepalived 产物都会连同 `ldd` 收集的动态库打成单架构 Installer 镜像（如 `haproxy:3.2.26-amd64` 与 `keepalived:2.4.3-amd64`），在镜像步骤推送到私有 Registry。目标节点不接收这两个宿主机二进制。请在架构一致且 ABI 兼容的环境中执行该步骤；例如安装 arm64 集群时，Installer Host 也必须是 arm64。本版不支持在 amd64 下载机为 arm64 目标构建 HA 产物，会直接报错。
+HAProxy 与 keepalived 产物都会连同 `ldd` 收集的动态库以及运行期才会加载的 `libgcc_s.so.1` 打成单架构 Installer 镜像（如 `haproxy:3.2.26-amd64` 与 `keepalived:2.4.3-amd64`），在镜像步骤推送到私有 Registry。目标节点不接收这两个宿主机二进制。请在架构一致且 ABI 兼容的环境中执行该步骤；例如安装 arm64 集群时，Installer Host 也必须是 arm64。本版不支持在 amd64 下载机为 arm64 目标构建 HA 产物，会直接报错。
 
 ### 3. 部署或复用 Registry
 
@@ -388,9 +389,9 @@ kubedo install --config cluster.yaml [--manifest build.yaml] \
 2. **containerd**：安装 containerd/runc/cni-plugins/crictl；使用 containerd 2.x 原生 v4 配置，钉住私有 Registry 中的 pause sandbox 镜像，启用 `SystemdCgroup` 与 CRI runtime，配置 Registry CA 和 `hosts.toml` 后启动 containerd。归档按 `<name>-<version>` 解压到 `/var/cache/kubedo/` 下，避免切换 Build 后复用旧版本目录；containerd 与 CNI 插件逐文件安装并显式设置为 `0755`（对目录递归复制不会可靠保留可执行位）。
 3. **kubernetes**：安装 kubeadm/kubelet/kubectl 与 kubelet systemd unit；kubelet 同时使用 bootstrap kubeconfig 和最终 kubeconfig，由 kubeadm 完成引导，并通过 `failSwapOn: true` 拒绝在残留 swap 的节点上启动。
 4. **ha**：systemd 通过 `ctr` 分别拉起 HAProxy 与 keepalived 容器，两者都使用 hostNetwork 和 hostPID。HAProxy 挂载 `/etc/haproxy` 与 `/run/haproxy`；keepalived 额外增加 `CAP_NET_ADMIN`/`CAP_NET_RAW`，挂载 `/etc/keepalived` 和 `/run/keepalived`。共享 hostPID 后，keepalived 仍可用原生 `vrrp_track_process` 跟踪容器中的 HAProxy 进程。角色会按节点自身地址选择非 loopback 网卡、继承前缀，配置 VRRP unicast 与 VIP；VIP 自身不参与网卡探测，以免 VIP 已落在错误接口时污染后续运行。角色还会停止并禁用旧 `haproxy.service`/`keepalived.service`，删除 `/usr/local/sbin/haproxy`、`/usr/local/sbin/keepalived` 和旧 unit。容器必须在 kubeadm init 前启动，因此不是 Kubernetes 工作负载。
-5. **init**：第一台 Control Plane 执行 `kubeadm init --upload-certs`，跳过 `addon/kube-proxy`；InitConfiguration 将 API、etcd 与组件健康检查超时放宽到 5–10 分钟，避免慢速机器冷启动被默认的 1 分钟超时误判。随后按本节点 `/etc/resolv.conf` 重建 CoreDNS Corefile：存在可用上游时转发，否则只提供集群内解析。
+5. **init**：第一台 Control Plane 执行 `kubeadm init --upload-certs`，跳过 `addon/kube-proxy`；InitConfiguration 将 API、etcd 与组件健康检查超时放宽到 5–10 分钟，避免慢速机器冷启动被默认的 1 分钟超时误判。随后读取本节点 `/etc/resolv.conf`，必要时回退到 `resolvectl dns`，过滤 loopback stub 后重建 CoreDNS Corefile：存在真实上游时启用 `forward` 与 `loop`，否则只提供集群内解析。
 6. **join**：其余 Control Plane 与全部 Worker 加入集群。
-7. **cilium**：解压 Helm 到版本化目录后，用 Helm 安装 Cilium；启用 kube-proxy replacement，所有镜像指向私有 Registry，`k8sServiceHost` 指向 VIP、`k8sServicePort` 指向 `apiPort`；`hubble.peerService.clusterDomain` 同步为 `cni.clusterDomain`，Hubble relay 启用、UI 关闭。
+7. **cilium**：先等待 API `/readyz`，并清理 `pending-*`/`failed` 的 Helm release 以及 terminating/orphaned `cilium-secrets` namespace；随后以 `--atomic --wait` 安装 Cilium，失败时自动回滚，重新执行时可以从前一次中断中恢复。启用 kube-proxy replacement，所有镜像指向私有 Registry，`k8sServiceHost` 指向 VIP、`k8sServicePort` 指向 `apiPort`；`hubble.peerService.clusterDomain` 同步为 `cni.clusterDomain`，Hubble relay 启用、UI 关闭。
 8. **verify**：等待节点 Ready、Cilium operator、CoreDNS 与 Hubble Relay 就绪，并断言 kube-proxy DaemonSet 不存在。
 
 可用 tag：`prerequisites`、`containerd`、`kubernetes`、`ha`、`init`、`join`、`join-control-plane`、`join-workers`、`cilium`、`verify`。
@@ -537,6 +538,7 @@ ansible-playbook -i ../rendered/inventory.ini --syntax-check site.yml
 - 4 台节点整机重启后 SELinux 均为 `Disabled`，containerd/kubelet 自动恢复，全部节点重新 `Ready`，VIP 与 `<VIP>:16443/readyz` 正常；firewalld 未运行，swap 已关闭。
 - **Debian 12 / amd64 全新安装回归**：2026-10-25 从空白 Debian 12 cloud image 启动 4 台目标节点，`kubedo check` 预检为 `13/13 verified`，完整 `kubedo install` 退出码为 0。3 个 Control Plane 与 1 个 Worker 全部 `Ready`（Debian GNU/Linux 12、containerd 2.3.6、kubelet v1.36.5）；ufw 未安装或未启用、无 SELinux 路径、Helm 使用 `linux-amd64` 归档、etcd 静态 Pod 与 Cilium kube-proxy replacement 均正常，VIP `192.168.124.130:16443` 可用。
 - **keepalived 容器化回归（Debian 12 / amd64，HAProxy 仍为旧宿主二进制）**：2026-10-26 由 `kubedo download --images-only` 生成并推送 `192.168.124.10:5000/kubedo/keepalived:2.4.3-amd64`；三台 Control Plane 均通过 `kubedo-keepalived.service` 启动 hostNetwork/hostPID 容器，旧的宿主机 keepalived 二进制与 unit 已移除。停止 cp-1 HAProxy 后 keepalived 将有效优先级从 200 降至 170，VIP 约 6 秒漂移到 cp-2；恢复 HAProxy 后约 4 秒回切，期间 VIP `/readyz` 返回 `ok`。cp-2 整机重启后 containerd、keepalived 容器和 HAProxy 自动恢复，4 节点保持 `Ready`。该轮回归尚未覆盖 HAProxy 容器。
+- **Fedora 44 / amd64 容器化 HAProxy 回归（2026-11-02）**：9 台 libvirt 虚拟机（3 Control Plane + 5 Worker + 1 Toolbox）的虚盘与客户机 Btrfs 均扩容到 50 GiB，HAProxy 与 keepalived 均以 systemd 托管的 hostNetwork/hostPID 容器运行；HAProxy 镜像已确认包含 `/lib64/libgcc_s.so.1`。部署后 8 个 Kubernetes 节点全部 `Ready`，VIP `192.168.122.50:16443/readyz` 返回 `ok`，Cilium、CoreDNS 与 Hubble Relay 正常。重跑 prerequisites、init、cilium 与 verify 均通过。
 - 实验环境的公网链路无法稳定直连 `registry.k8s.io` 与 GitHub Release，因此资源准备使用了实验清单：部分二进制经 GitHub 代理下载，Kubernetes 镜像从阿里云同步源拉取。二进制与 Helm chart 均按项目内嵌清单的官方 SHA-256 校验；镜像的 tag 与内嵌清单一致，但本轮**没有**将镜像 digest 与 `registry.k8s.io` 官方仓库逐项比对。项目内嵌 Manifest 的正式上游 URL 未被替换。
 
 ### 尚未验证
@@ -544,8 +546,8 @@ ansible-playbook -i ../rendered/inventory.ini --syntax-check site.yml
 - 真实 RHEL 9 物理机、其他 RHEL 9.x 小版本，以及多网卡、非默认 MTU、真实交换机网络下的 VRRP 与 Cilium 行为。
 - Debian 13、Ubuntu 22.04/24.04 与 arm64 目标的端到端集群安装。Debian 12/amd64 已完成实机验证，其余组合只完成代码、Ansible 分支和资源校验。
 - arm64 Installer Host 到 arm64 目标节点的 glibc ABI 组合、HAProxy/keepalived 镜像启动与端到端集群安装；当前只证明 arm64 构建配方可产出并启动原生产物。
-- 多 Worker 编排、长期运行稳定性、断网/断电恢复，以及安装进程中断后的自动续跑。若 Helm 在 `--wait` 阶段被中断，release 可能停留在 `pending-install`；本版不会自动清理，需人工确认后执行 `helm -n kube-system uninstall cilium` 再重跑 Cilium 阶段。
-- Installer Host 与目标节点之间的所有 glibc ABI 组合；历史回归证明旧设计的 Rocky Linux 9.8 HAProxy 二进制可分发给 Rocky Linux 9.8 与 Debian 12 节点，并证明 keepalived 镜像可跨发行版运行在 Debian 12；HAProxy 容器镜像尚未完成端到端回归，也未覆盖 Debian 系构建机、arm64 或跨发行版的其他组合。
+- 多 Worker 编排、长期运行稳定性、断网/断电恢复，以及所有阶段安装进程中断后的自动续跑。Cilium 阶段会清理 `pending-*`/`failed` release 与残留的 `cilium-secrets` namespace，并使用 `helm --atomic --wait` 回滚失败安装；其他阶段仍不保证中断后无需人工检查即可续跑。
+- Installer Host 与目标节点之间的所有 glibc ABI 组合；历史回归证明旧设计的 Rocky Linux 9.8 HAProxy 二进制可分发给 Rocky Linux 9.8 与 Debian 12 节点，并证明 keepalived 镜像可跨发行版运行在 Debian 12。HAProxy 容器镜像已完成 Fedora 44 同版本端到端回归，但仍未覆盖 Debian 系构建机、arm64 或跨发行版的其他组合。
 
 ## 设计决策
 

@@ -98,3 +98,18 @@ func TestParseLddRejectsNotFound(t *testing.T) {
 		t.Fatalf("expected missing dependency error, got %v", err)
 	}
 }
+
+func TestMergeLibrariesAddsExistingRuntimeLibrary(t *testing.T) {
+	dir := t.TempDir()
+	runtimeLibrary := filepath.Join(dir, "libgcc_s.so.1")
+	if err := os.WriteFile(runtimeLibrary, []byte("fake-libgcc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "missing.so")
+
+	got := mergeLibraries([]string{"/lib64/libc.so.6", runtimeLibrary}, runtimeLibrary, missing)
+	want := []string{"/lib64/libc.so.6", runtimeLibrary}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("libraries = %#v, want %#v", got, want)
+	}
+}

@@ -49,9 +49,28 @@
   register: kubedo_host_nameservers
   changed_when: false
 
+- name: Discover systemd-resolved upstream resolvers
+  ansible.builtin.command:
+    argv:
+      - resolvectl
+      - dns
+  register: kubedo_resolved_dns
+  changed_when: false
+  failed_when: false
+
 - name: Record usable CoreDNS upstream resolvers
   ansible.builtin.set_fact:
-    kubedo_coredns_upstreams: "{{ kubedo_host_nameservers.stdout_lines | reject('equalto', '127.0.0.1') | reject('equalto', '::1') | list }}"
+    kubedo_coredns_upstreams: >-
+      {{ (kubedo_host_nameservers.stdout_lines
+          + (kubedo_resolved_dns.stdout | default('')
+             | regex_findall('((?:[0-9]{1,3}\.){3}[0-9]{1,3})')
+             if kubedo_resolved_dns.rc == 0 else []))
+         | reject('match', '^127\.')
+         | reject('equalto', '0.0.0.0')
+         | reject('equalto', '::1')
+         | reject('equalto', '::')
+         | unique
+         | list }}
 
 - name: Install the CoreDNS Corefile
   ansible.builtin.template:

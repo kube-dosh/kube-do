@@ -6,16 +6,44 @@
       - platform_arch in ['amd64', 'arm64']
       - (platform_arch == 'amd64' and ansible_facts.architecture == 'x86_64') or
         (platform_arch == 'arm64' and ansible_facts.architecture == 'aarch64')
-      - (platform_os_family == 'rhel' and ansible_facts.os_family == 'RedHat' and ansible_facts.distribution_major_version | int == 9) or
+      - (platform_os_family == 'rhel' and ansible_facts.os_family == 'RedHat' and
+         ((ansible_facts.distribution == 'Fedora' and ansible_facts.distribution_major_version | int == 44) or
+          (ansible_facts.distribution != 'Fedora' and ansible_facts.distribution_major_version | int == 9))) or
         (platform_os_family == 'debian' and ansible_facts.os_family == 'Debian' and
           ((ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version | int in [12, 13]) or
            (ansible_facts.distribution == 'Ubuntu' and
             (ansible_facts.distribution_version is match('^22[.]04([.]|$)') or ansible_facts.distribution_version is match('^24[.]04([.]|$)')))))
     fail_msg: >-
-      kubedo supports RHEL-family 9, Debian 12/13 and Ubuntu 22.04/24.04 on
+      kubedo supports RHEL-family 9, Fedora 44, Debian 12/13 and Ubuntu 22.04/24.04 on
       amd64 or arm64 only; got {{ ansible_facts.distribution }}
       {{ ansible_facts.distribution_version }} {{ ansible_facts.architecture }}
       while cluster.yaml requests {{ platform_os_family }}/{{ platform_arch }}
+
+- name: Select the root filesystem
+  ansible.builtin.set_fact:
+    kubedo_root_filesystem: "{{ ansible_mounts | selectattr('mount', 'equalto', '/') | first }}"
+    kubedo_root_total_gib: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_total | int / 1073741824 | round(1) }}"
+    kubedo_root_available_gib: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_available | int / 1073741824 | round(1) }}"
+
+- name: Assert minimum root filesystem capacity
+  ansible.builtin.assert:
+    that:
+      - kubedo_root_filesystem.size_total | int >= kubedo_min_root_total_bytes
+      - kubedo_root_filesystem.size_available | int >= kubedo_min_root_available_bytes
+    fail_msg: >-
+      the root filesystem has {{ kubedo_root_total_gib }} GiB total and
+      {{ kubedo_root_available_gib }} GiB available; Kubernetes control-plane
+      storage and container images require at least 20 GiB total and 5 GiB
+      available. Resize the virtual disk and guest filesystem before installing.
+
+- name: Warn about the recommended root filesystem capacity
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: the root filesystem has {{ kubedo_root_total_gib }} GiB total;
+      kubedo recommends provisioning at least a 50 GiB disk for control-plane
+      nodes (about 49 GiB usable filesystem) because etcd, container images and
+      logs share this filesystem.
+  when: kubedo_root_filesystem.size_total | int < kubedo_recommended_root_total_bytes
 
 - name: Ensure kubelet can read a resolver configuration
   ansible.builtin.copy:
