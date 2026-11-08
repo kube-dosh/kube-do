@@ -1,7 +1,7 @@
 /rendered/
 /dist/
-/.kubedo/
-/kubedo
+/.kube-do/
+/kube-do
 /cluster*.yaml
 /registry-bundle*/
 *.test

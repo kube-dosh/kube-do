@@ -1,4 +1,4 @@
-// Package check implements `kubedo check`: local preflight validation.
+// Package check implements `kube-do check`: local preflight validation.
 package check
 
 import (
@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kubedo/kubedo/internal/cluster"
-	"github.com/kubedo/kubedo/internal/layout"
-	"github.com/kubedo/kubedo/internal/manifest"
-	"github.com/kubedo/kubedo/internal/registry"
+	"github.com/kube-dosh/kube-do/internal/cluster"
+	"github.com/kube-dosh/kube-do/internal/layout"
+	"github.com/kube-dosh/kube-do/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/registry"
 )
 
 type Status string
@@ -133,9 +133,9 @@ func checkArtifacts(cacheDir string, m *manifest.Manifest, platformOS, arch stri
 	case mismatched > 0:
 		return Result{Name: "artifacts", Status: StatusFail, Detail: fmt.Sprintf("%d/%d verified, %d missing, %d unverified, %d checksum mismatch", verified, total, missing, unverified, mismatched)}
 	case missing > 0:
-		return Result{Name: "artifacts", Status: StatusWarn, Detail: fmt.Sprintf("%d/%d verified, %d missing, %d unverified (run 'kubedo download')", verified, total, missing, unverified)}
+		return Result{Name: "artifacts", Status: StatusWarn, Detail: fmt.Sprintf("%d/%d verified, %d missing, %d unverified (run 'kube-do download')", verified, total, missing, unverified)}
 	case unverified > 0:
-		return Result{Name: "artifacts", Status: StatusWarn, Detail: fmt.Sprintf("%d/%d verified, %d built without checksum sidecar (rerun 'kubedo download')", verified, total, unverified)}
+		return Result{Name: "artifacts", Status: StatusWarn, Detail: fmt.Sprintf("%d/%d verified, %d built without checksum sidecar (rerun 'kube-do download')", verified, total, unverified)}
 	default:
 		return Result{Name: "artifacts", Status: StatusOK, Detail: fmt.Sprintf("%d/%d verified", verified, total)}
 	}

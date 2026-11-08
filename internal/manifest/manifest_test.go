@@ -8,7 +8,7 @@ import (
 const testSHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func validManifestYAML() string {
-	return `apiVersion: kubedo.io/v1alpha1
+	return `apiVersion: kube-do.io/v1alpha1
 kind: ResourceManifest
 metadata:
   name: test-build
@@ -18,7 +18,7 @@ spec:
     os: linux
     arch: amd64
   registry:
-    namespace: kubedo
+    namespace: kube-do
   installer:
     binaries: []
   binaries:
@@ -232,7 +232,7 @@ func TestValidateRejectsUnsafeBuildName(t *testing.T) {
 }
 
 func TestValidateRejectsUnsafeNamespace(t *testing.T) {
-	bad := strings.Replace(validManifestYAML(), "namespace: kubedo", "namespace: ../escape", 1)
+	bad := strings.Replace(validManifestYAML(), "namespace: kube-do", "namespace: ../escape", 1)
 	_, err := Parse([]byte(bad))
 	if err == nil || !strings.Contains(err.Error(), "repository namespace") {
 		t.Fatalf("expected namespace error, got %v", err)
@@ -268,11 +268,11 @@ func TestValidateRejectsUnsafeBinaryNameAndVersion(t *testing.T) {
 
 func TestTargetRef(t *testing.T) {
 	img := Image{Name: "pause", Source: "registry.k8s.io/pause:3.10.2", Target: "pause:3.10.2"}
-	got, err := img.TargetRef("reg.internal:5000", "kubedo")
+	got, err := img.TargetRef("reg.internal:5000", "kube-do")
 	if err != nil {
 		t.Fatalf("TargetRef: %v", err)
 	}
-	if want := "reg.internal:5000/kubedo/pause:3.10.2"; got != want {
+	if want := "reg.internal:5000/kube-do/pause:3.10.2"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }

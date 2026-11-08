@@ -8,12 +8,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/kubedo/kubedo/internal/cluster"
-	"github.com/kubedo/kubedo/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/cluster"
+	"github.com/kube-dosh/kube-do/internal/manifest"
 )
 
 func TestRender(t *testing.T) {
-	cfg, err := cluster.Parse([]byte(`apiVersion: kubedo.io/v1alpha1
+	cfg, err := cluster.Parse([]byte(`apiVersion: kube-do.io/v1alpha1
 kind: ClusterConfig
 metadata:
   name: test
@@ -28,7 +28,7 @@ registry:
 ssh:
   user: installer
   port: 2222
-  privateKeyFile: /root/.ssh/kubedo
+  privateKeyFile: /root/.ssh/kube-do
 controlPlane:
   vip: 10.0.0.100
   nodes:
@@ -44,7 +44,7 @@ cni:
 	if err != nil {
 		t.Fatalf("cluster.Parse: %v", err)
 	}
-	m, err := manifest.Parse([]byte(`apiVersion: kubedo.io/v1alpha1
+	m, err := manifest.Parse([]byte(`apiVersion: kube-do.io/v1alpha1
 kind: ResourceManifest
 metadata:
   name: test-build
@@ -56,7 +56,7 @@ spec:
     - os: linux
       arch: arm64
   registry:
-    namespace: kubedo
+    namespace: kube-do
   installer:
     binaries:
       - name: registry
@@ -123,8 +123,8 @@ spec:
 	}
 	for _, want := range []string{
 		"[installer]",
-		"cp-1 ansible_host=10.0.0.11 ansible_user=installer ansible_port=2222 kubedo_node_ip=10.0.0.11 ansible_ssh_private_key_file=/root/.ssh/kubedo",
-		"worker-1 ansible_host=10.0.0.21 ansible_user=installer ansible_port=2222 kubedo_node_ip=10.0.0.21 ansible_ssh_private_key_file=/root/.ssh/kubedo",
+		"cp-1 ansible_host=10.0.0.11 ansible_user=installer ansible_port=2222 kube-do_node_ip=10.0.0.11 ansible_ssh_private_key_file=/root/.ssh/kube-do",
+		"worker-1 ansible_host=10.0.0.21 ansible_user=installer ansible_port=2222 kube-do_node_ip=10.0.0.21 ansible_ssh_private_key_file=/root/.ssh/kube-do",
 		"[k8s_cluster:children]",
 	} {
 		if !strings.Contains(string(inventory), want) {
@@ -140,8 +140,8 @@ spec:
 	if err := yaml.Unmarshal(data, &vars); err != nil {
 		t.Fatalf("group vars are not valid YAML: %v", err)
 	}
-	if vars["kubedo_build"] != "test-build" {
-		t.Fatalf("kubedo_build = %v", vars["kubedo_build"])
+	if vars["kube-do_build"] != "test-build" {
+		t.Fatalf("kube-do_build = %v", vars["kube-do_build"])
 	}
 	if vars["control_plane_endpoint"] != "https://10.0.0.100:16443" {
 		t.Fatalf("endpoint = %v", vars["control_plane_endpoint"])
@@ -169,10 +169,10 @@ spec:
 		t.Fatalf("installer images = %#v", vars["installer_images"])
 	}
 	installerImage := installerImages[0].(map[string]any)
-	if installerImage["target"] != "10.0.0.10:5000/kubedo/registry-runtime:3.1.2-arm64" {
+	if installerImage["target"] != "10.0.0.10:5000/kube-do/registry-runtime:3.1.2-arm64" {
 		t.Fatalf("installer image target = %v", installerImage["target"])
 	}
-	if installerImage["repository"] != "10.0.0.10:5000/kubedo/registry-runtime" || installerImage["tag"] != "3.1.2-arm64" {
+	if installerImage["repository"] != "10.0.0.10:5000/kube-do/registry-runtime" || installerImage["tag"] != "3.1.2-arm64" {
 		t.Fatalf("installer image repository/tag = %v/%v", installerImage["repository"], installerImage["tag"])
 	}
 	images, ok := vars["images"].([]any)
@@ -180,10 +180,10 @@ spec:
 		t.Fatalf("images = %#v", vars["images"])
 	}
 	img := images[0].(map[string]any)
-	if img["target"] != "10.0.0.10:5000/kubedo/pause:3.10.2" {
+	if img["target"] != "10.0.0.10:5000/kube-do/pause:3.10.2" {
 		t.Fatalf("image target = %v", img["target"])
 	}
-	if img["repository"] != "10.0.0.10:5000/kubedo/pause" || img["tag"] != "3.10.2" {
+	if img["repository"] != "10.0.0.10:5000/kube-do/pause" || img["tag"] != "3.10.2" {
 		t.Fatalf("image repository/tag = %v/%v", img["repository"], img["tag"])
 	}
 	if vars["ssh_user"] != "installer" || vars["ssh_port"] != 2222 || vars["pod_cidr"] != "10.244.0.0/16" {

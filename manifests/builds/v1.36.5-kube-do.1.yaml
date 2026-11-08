@@ -1,7 +1,7 @@
-apiVersion: kubedo.io/v1alpha1
+apiVersion: kube-do.io/v1alpha1
 kind: ResourceManifest
 metadata:
-  name: v1.36.5-kubedo.1
+  name: v1.36.5-kube-do.1
   kubernetesVersion: v1.36.5
 spec:
   platforms:
@@ -10,7 +10,7 @@ spec:
     - os: linux
       arch: arm64
   registry:
-    namespace: kubedo
+    namespace: kube-do
   installer:
     binaries:
       - name: registry

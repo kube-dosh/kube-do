@@ -6,7 +6,7 @@ timeouts:
   kubeletHealthCheck: 10m
   kubernetesAPICall: 5m
 localAPIEndpoint:
-  advertiseAddress: {{ kubedo_node_ip }}
+  advertiseAddress: {{ kube-do_node_ip }}
   bindPort: 6443
 nodeRegistration:
   name: {{ inventory_hostname }}
@@ -14,7 +14,7 @@ nodeRegistration:
   imagePullPolicy: IfNotPresent
   kubeletExtraArgs:
     - name: node-ip
-      value: {{ kubedo_node_ip }}
+      value: {{ kube-do_node_ip }}
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
@@ -35,11 +35,11 @@ apiServer:
 {% endfor %}
 dns:
   imageRepository: {{ registry_address }}/{{ registry_namespace }}/coredns
-  imageTag: {{ kubedo_coredns_image.tag }}
+  imageTag: {{ kube-do_coredns_image.tag }}
 etcd:
   local:
     imageRepository: {{ registry_address }}/{{ registry_namespace }}
-    imageTag: {{ kubedo_etcd_image.tag }}
+    imageTag: {{ kube-do_etcd_image.tag }}
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration

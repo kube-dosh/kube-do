@@ -91,7 +91,7 @@ func TestEnsureDryRun(t *testing.T) {
 
 	res, err := Ensure(context.Background(), Options{
 		Address:       addr,
-		DataDir:       "/var/lib/kubedo/registry",
+		DataDir:       "/var/lib/kube-do/registry",
 		TLSMode:       TLSModeSelfSigned,
 		SourceArchive: archivePath,
 		DryRun:        true,
@@ -104,7 +104,7 @@ func TestEnsureDryRun(t *testing.T) {
 	if res.Reused {
 		t.Fatal("expected deployment, got reuse")
 	}
-	for _, rel := range []string{"bin/registry", "config.yml", "kubedo-registry.service", "tls/ca.crt", "tls/server.crt", "tls/server.key"} {
+	for _, rel := range []string{"bin/registry", "config.yml", "kube-do-registry.service", "tls/ca.crt", "tls/server.crt", "tls/server.key"} {
 		if _, err := os.Stat(filepath.Join(out, rel)); err != nil {
 			t.Errorf("%s missing: %v", rel, err)
 		}
@@ -113,14 +113,14 @@ func TestEnsureDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(config), "/var/lib/kubedo/registry") {
+	if !strings.Contains(string(config), "/var/lib/kube-do/registry") {
 		t.Fatalf("config missing data dir:\n%s", config)
 	}
 	_, port, _ := net.SplitHostPort(addr)
 	if !strings.Contains(string(config), ":"+port) {
 		t.Fatalf("config missing port %s:\n%s", port, config)
 	}
-	unit, err := os.ReadFile(filepath.Join(out, "kubedo-registry.service"))
+	unit, err := os.ReadFile(filepath.Join(out, "kube-do-registry.service"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestEnsureDryRunIgnoresOccupiedPort(t *testing.T) {
 
 	res, err := Ensure(context.Background(), Options{
 		Address:       ln.Addr().String(),
-		DataDir:       "/var/lib/kubedo/registry",
+		DataDir:       "/var/lib/kube-do/registry",
 		TLSMode:       TLSModeSelfSigned,
 		SourceArchive: archivePath,
 		DryRun:        true,
@@ -223,7 +223,7 @@ func TestEnsureDryRunUsesAbsolutePaths(t *testing.T) {
 
 	res, err := Ensure(context.Background(), Options{
 		Address:       freeAddr(t),
-		DataDir:       "/var/lib/kubedo/registry",
+		DataDir:       "/var/lib/kube-do/registry",
 		TLSMode:       TLSModeSelfSigned,
 		SourceArchive: archivePath,
 		DryRun:        true,
@@ -239,7 +239,7 @@ func TestEnsureDryRunUsesAbsolutePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantExec := "ExecStart=" + filepath.Join(out, "bin", "registry") + " serve " + filepath.Join(out, "config.yml")
-	unit, err := os.ReadFile(filepath.Join(out, "kubedo-registry.service"))
+	unit, err := os.ReadFile(filepath.Join(out, "kube-do-registry.service"))
 	if err != nil {
 		t.Fatal(err)
 	}

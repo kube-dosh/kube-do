@@ -1,11 +1,11 @@
 #!/bin/sh
 set -eu
 
-namespace=kubedo
+namespace=kube-do
 container=haproxy
-image={{ kubedo_haproxy_image.target | quote }}
+image={{ kube-do_haproxy_image.target | quote }}
 
-mkdir -p /run/haproxy /var/log/kubedo
+mkdir -p /run/haproxy /var/log/kube-do
 
 ctr --namespace "$namespace" task delete --force "$container" >/dev/null 2>&1 || true
 ctr --namespace "$namespace" containers delete "$container" >/dev/null 2>&1 || true
@@ -15,7 +15,7 @@ ctr --namespace "$namespace" images pull \
   "$image"
 
 ctr --namespace "$namespace" run --detach \
-  --log-uri file:///var/log/kubedo/haproxy.log \
+  --log-uri file:///var/log/kube-do/haproxy.log \
   --rlimit-nofile 1048576:1048576 \
   --net-host \
   --with-ns pid:/proc/1/ns/pid \

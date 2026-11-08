@@ -6,11 +6,11 @@ import (
 )
 
 func validConfigYAML() string {
-	return `apiVersion: kubedo.io/v1alpha1
+	return `apiVersion: kube-do.io/v1alpha1
 kind: ClusterConfig
 metadata:
   name: test
-build: v1.36.5-kubedo.1
+build: v1.36.5-kube-do.1
 installer:
   address: 10.0.0.10
 registry:
@@ -37,7 +37,7 @@ func TestParseDefaults(t *testing.T) {
 	if c.ControlPlane.APIPort != 16443 {
 		t.Fatalf("apiPort = %d", c.ControlPlane.APIPort)
 	}
-	if c.Registry.DataDir != "/var/lib/kubedo/registry" {
+	if c.Registry.DataDir != "/var/lib/kube-do/registry" {
 		t.Fatalf("dataDir = %q", c.Registry.DataDir)
 	}
 	if c.Registry.TLS.Mode != TLSModeSelfSigned {
@@ -61,7 +61,7 @@ func TestParseDefaults(t *testing.T) {
 }
 
 func TestParseExplicitPlatform(t *testing.T) {
-	yaml := strings.Replace(validConfigYAML(), "build: v1.36.5-kubedo.1", "build: v1.36.5-kubedo.1\nplatform:\n  osFamily: debian\n  arch: arm64", 1)
+	yaml := strings.Replace(validConfigYAML(), "build: v1.36.5-kube-do.1", "build: v1.36.5-kube-do.1\nplatform:\n  osFamily: debian\n  arch: arm64", 1)
 	c, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -82,7 +82,7 @@ func TestValidateRejectsUnsupportedPlatform(t *testing.T) {
 		{"platform:\n  osFamily: alpine\n  arch: amd64", "platform.osFamily"},
 		{"platform:\n  osFamily: rhel\n  arch: riscv64", "platform.arch"},
 	} {
-		yaml := strings.Replace(validConfigYAML(), "build: v1.36.5-kubedo.1", "build: v1.36.5-kubedo.1\n"+tc.value, 1)
+		yaml := strings.Replace(validConfigYAML(), "build: v1.36.5-kube-do.1", "build: v1.36.5-kube-do.1\n"+tc.value, 1)
 		_, err := Parse([]byte(yaml))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("expected %q error, got %v", tc.want, err)
@@ -235,7 +235,7 @@ func TestValidateRejectsNonIPv4CIDR(t *testing.T) {
 }
 
 func TestValidateRejectsUnsafeBuildName(t *testing.T) {
-	bad := strings.Replace(validConfigYAML(), "build: v1.36.5-kubedo.1", "build: ../escape", 1)
+	bad := strings.Replace(validConfigYAML(), "build: v1.36.5-kube-do.1", "build: ../escape", 1)
 	_, err := Parse([]byte(bad))
 	if err == nil || !strings.Contains(err.Error(), "safe single path segment") {
 		t.Fatalf("expected build name error, got %v", err)

@@ -14,7 +14,7 @@ func TestEmbeddedBuilds(t *testing.T) {
 	if len(names) == 0 {
 		t.Fatal("Names returned no embedded builds")
 	}
-	const build = "v1.36.5-kubedo.1"
+	const build = "v1.36.5-kube-do.1"
 	found := false
 	for _, name := range names {
 		if name == build {
@@ -74,7 +74,7 @@ func TestEmbeddedBuilds(t *testing.T) {
 }
 
 func TestUnknownBuild(t *testing.T) {
-	_, err := Get("v0.0.0-kubedo.999")
+	_, err := Get("v0.0.0-kube-do.999")
 	if err == nil || !strings.Contains(err.Error(), "unknown build") {
 		t.Fatalf("expected unknown build error, got %v", err)
 	}
@@ -82,18 +82,18 @@ func TestUnknownBuild(t *testing.T) {
 
 func TestSortBuildNames(t *testing.T) {
 	names := []string{
-		"v1.36.5-kubedo.10",
+		"v1.36.5-kube-do.10",
 		"custom-build",
-		"v1.36.5-kubedo.2",
-		"v1.37.0-kubedo.1",
-		"v1.36.4-kubedo.9",
+		"v1.36.5-kube-do.2",
+		"v1.37.0-kube-do.1",
+		"v1.36.4-kube-do.9",
 	}
 	sortBuildNames(names)
 	want := []string{
-		"v1.36.4-kubedo.9",
-		"v1.36.5-kubedo.2",
-		"v1.36.5-kubedo.10",
-		"v1.37.0-kubedo.1",
+		"v1.36.4-kube-do.9",
+		"v1.36.5-kube-do.2",
+		"v1.36.5-kube-do.10",
+		"v1.37.0-kube-do.1",
 		"custom-build",
 	}
 	if !reflect.DeepEqual(names, want) {

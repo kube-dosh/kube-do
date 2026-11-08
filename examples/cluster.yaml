@@ -1,8 +1,8 @@
-apiVersion: kubedo.io/v1alpha1
+apiVersion: kube-do.io/v1alpha1
 kind: ClusterConfig
 metadata:
   name: demo
-build: v1.36.5-kubedo.1
+build: v1.36.5-kube-do.1
 platform:
   osFamily: rhel
   arch: amd64
@@ -11,7 +11,7 @@ installer:
   downloadPort: 8080
 registry:
   address: 10.0.0.10:5000
-  dataDir: /var/lib/kubedo/registry
+  dataDir: /var/lib/kube-do/registry
   tls:
     mode: selfSigned
 ssh:
@@ -22,7 +22,7 @@ controlPlane:
   apiPort: 16443
   vrrp:
     routerId: 51
-    password: kubedo
+    password: kube-do
   nodes:
     - name: cp-1
       address: 10.0.0.11

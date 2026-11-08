@@ -1,4 +1,4 @@
 ---
-kubedo_min_root_total_bytes: 21474836480
-kubedo_min_root_available_bytes: 5368709120
-kubedo_recommended_root_total_bytes: 52613349376
+kube-do_min_root_total_bytes: 21474836480
+kube-do_min_root_available_bytes: 5368709120
+kube-do_recommended_root_total_bytes: 52613349376

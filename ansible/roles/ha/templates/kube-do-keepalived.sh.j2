@@ -1,11 +1,11 @@
 #!/bin/sh
 set -eu
 
-namespace=kubedo
+namespace=kube-do
 container=keepalived
-image={{ kubedo_keepalived_image.target | quote }}
+image={{ kube-do_keepalived_image.target | quote }}
 
-mkdir -p /run/keepalived /var/log/kubedo
+mkdir -p /run/keepalived /var/log/kube-do
 
 ctr --namespace "$namespace" task delete --force "$container" >/dev/null 2>&1 || true
 ctr --namespace "$namespace" containers delete "$container" >/dev/null 2>&1 || true
@@ -15,7 +15,7 @@ ctr --namespace "$namespace" images pull \
   "$image"
 
 ctr --namespace "$namespace" run --detach \
-  --log-uri file:///var/log/kubedo/keepalived.log \
+  --log-uri file:///var/log/kube-do/keepalived.log \
   --net-host \
   --with-ns pid:/proc/1/ns/pid \
   --cap-add CAP_NET_ADMIN \

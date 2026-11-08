@@ -7,10 +7,10 @@
       - --type=swap
       - --no-legend
       - --no-pager
-  register: kubedo_systemd_swap_unit_files
+  register: kube-do_systemd_swap_unit_files
   changed_when: false
   check_mode: false
-  failed_when: kubedo_systemd_swap_unit_files.rc not in [0, 1]
+  failed_when: kube-do_systemd_swap_unit_files.rc not in [0, 1]
 
 - name: List systemd service unit files
   ansible.builtin.command:
@@ -20,7 +20,7 @@
       - --type=service
       - --no-legend
       - --no-pager
-  register: kubedo_systemd_service_unit_files
+  register: kube-do_systemd_service_unit_files
   changed_when: false
   check_mode: false
 
@@ -36,7 +36,7 @@
       - --plain
       - zram*.service
       - systemd-zram*.service
-  register: kubedo_loaded_zram_services
+  register: kube-do_loaded_zram_services
   changed_when: false
   check_mode: false
 
@@ -50,53 +50,53 @@
       - --no-legend
       - --no-pager
       - --plain
-  register: kubedo_loaded_systemd_swap_units
+  register: kube-do_loaded_systemd_swap_units
   changed_when: false
   check_mode: false
 
 - name: Record swap and zram unit names
   ansible.builtin.set_fact:
-    kubedo_swap_unit_names: >-
+    kube-do_swap_unit_names: >-
       {{
-        kubedo_systemd_swap_unit_files.stdout_lines
+        kube-do_systemd_swap_unit_files.stdout_lines
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | select('match', '^\S+\.swap$')
         | list
       }}
-    kubedo_enabled_swap_units: >-
+    kube-do_enabled_swap_units: >-
       {{
-        kubedo_systemd_swap_unit_files.stdout_lines
+        kube-do_systemd_swap_unit_files.stdout_lines
         | select('search', '\s(enabled|enabled-runtime)\s')
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | list
       }}
-    kubedo_zram_service_unit_names: >-
+    kube-do_zram_service_unit_names: >-
       {{
-        kubedo_systemd_service_unit_files.stdout_lines
+        kube-do_systemd_service_unit_files.stdout_lines
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | select('search', 'zram')
         | select('match', '^\S+\.service$')
         | list
       }}
-    kubedo_enabled_zram_services: >-
+    kube-do_enabled_zram_services: >-
       {{
-        kubedo_systemd_service_unit_files.stdout_lines
+        kube-do_systemd_service_unit_files.stdout_lines
         | select('search', 'zram')
         | select('search', '\s(enabled|enabled-runtime)\s')
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | list
       }}
-    kubedo_loaded_zram_service_names: >-
+    kube-do_loaded_zram_service_names: >-
       {{
-        kubedo_loaded_zram_services.stdout_lines
+        kube-do_loaded_zram_services.stdout_lines
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | select('search', 'zram')
         | select('match', '^\S+\.service$')
         | list
       }}
-    kubedo_loaded_swap_unit_names: >-
+    kube-do_loaded_swap_unit_names: >-
       {{
-        kubedo_loaded_systemd_swap_units.stdout_lines
+        kube-do_loaded_systemd_swap_units.stdout_lines
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | select('match', '^\S+\.swap$')
         | list
@@ -106,7 +106,7 @@
   ansible.builtin.systemd:
     name: "{{ item }}"
     state: stopped
-  loop: "{{ kubedo_loaded_swap_unit_names }}"
+  loop: "{{ kube-do_loaded_swap_unit_names }}"
 
 - name: Disable active swap
   ansible.builtin.command: swapoff -a
@@ -117,43 +117,43 @@
   ansible.builtin.systemd:
     name: "{{ item }}"
     state: stopped
-  loop: "{{ kubedo_loaded_zram_service_names }}"
+  loop: "{{ kube-do_loaded_zram_service_names }}"
 
 - name: Disable enabled zram services
   ansible.builtin.systemd:
     name: "{{ item }}"
     enabled: false
-  loop: "{{ kubedo_enabled_zram_services }}"
+  loop: "{{ kube-do_enabled_zram_services }}"
 
 - name: Mask zram services
   ansible.builtin.systemd:
     name: "{{ item }}"
     masked: true
-  loop: "{{ kubedo_zram_service_unit_names }}"
+  loop: "{{ kube-do_zram_service_unit_names }}"
 
 - name: Inspect /etc/fstab
   ansible.builtin.stat:
     path: /etc/fstab
-  register: kubedo_fstab
+  register: kube-do_fstab
 
 - name: Disable swap entries in /etc/fstab
   ansible.builtin.replace:
     path: /etc/fstab
     regexp: '^(?!\s*#)(\s*\S+\s+\S+\s+swap(?:\s+.*)?)$'
     replace: '# \1'
-  when: kubedo_fstab.stat.exists
+  when: kube-do_fstab.stat.exists
 
 - name: Disable enabled systemd swap units
   ansible.builtin.systemd:
     name: "{{ item }}"
     enabled: false
-  loop: "{{ kubedo_enabled_swap_units }}"
+  loop: "{{ kube-do_enabled_swap_units }}"
 
 - name: Mask systemd swap units
   ansible.builtin.systemd:
     name: "{{ item }}"
     masked: true
-  loop: "{{ kubedo_swap_unit_names }}"
+  loop: "{{ kube-do_swap_unit_names }}"
 
 - name: Inspect zram-generator configuration
   ansible.builtin.stat:
@@ -167,16 +167,16 @@
     - /usr/local/lib/systemd/zram-generator.conf.d
     - /run/systemd/zram-generator.conf
     - /run/systemd/zram-generator.conf.d
-  register: kubedo_zram_generator_config
+  register: kube-do_zram_generator_config
 
 - name: Disable zram-generator device definitions
   ansible.builtin.copy:
     dest: /etc/systemd/zram-generator.conf
     content: |
-      # Disabled by kubedo: Kubernetes nodes must not use zram swap.
+      # Disabled by kube-do: Kubernetes nodes must not use zram swap.
     mode: '0644'
     backup: true
-  when: kubedo_zram_generator_config.results | selectattr('stat.exists') | list | length > 0
+  when: kube-do_zram_generator_config.results | selectattr('stat.exists') | list | length > 0
 
 - name: Reload systemd after swap changes
   ansible.builtin.systemd:
@@ -185,16 +185,16 @@
 - name: Read active swap table
   ansible.builtin.slurp:
     src: /proc/swaps
-  register: kubedo_proc_swaps
+  register: kube-do_proc_swaps
   when: not ansible_check_mode
 
 - name: Read /etc/fstab after swap cleanup
   ansible.builtin.slurp:
     src: /etc/fstab
-  register: kubedo_fstab_content
+  register: kube-do_fstab_content
   when:
     - not ansible_check_mode
-    - kubedo_fstab.stat.exists
+    - kube-do_fstab.stat.exists
 
 - name: List remaining systemd swap unit files
   ansible.builtin.command:
@@ -204,10 +204,10 @@
       - --type=swap
       - --no-legend
       - --no-pager
-  register: kubedo_systemd_swap_unit_files_after
+  register: kube-do_systemd_swap_unit_files_after
   changed_when: false
   check_mode: false
-  failed_when: kubedo_systemd_swap_unit_files_after.rc not in [0, 1]
+  failed_when: kube-do_systemd_swap_unit_files_after.rc not in [0, 1]
 
 - name: List active zram services after swap cleanup
   ansible.builtin.command:
@@ -221,7 +221,7 @@
       - --plain
       - zram*.service
       - systemd-zram*.service
-  register: kubedo_active_zram_services
+  register: kube-do_active_zram_services
   changed_when: false
   check_mode: false
 
@@ -235,7 +235,7 @@
       - --no-legend
       - --no-pager
       - --plain
-  register: kubedo_active_systemd_swap_units
+  register: kube-do_active_systemd_swap_units
   changed_when: false
   check_mode: false
 
@@ -247,51 +247,51 @@
       - --type=service
       - --no-legend
       - --no-pager
-  register: kubedo_systemd_service_unit_files_after
+  register: kube-do_systemd_service_unit_files_after
   changed_when: false
   check_mode: false
 
 - name: Record remaining swap and zram state
   ansible.builtin.set_fact:
-    kubedo_active_swap_entries: >-
+    kube-do_active_swap_entries: >-
       {{
-        (kubedo_proc_swaps.content | b64decode).splitlines()
+        (kube-do_proc_swaps.content | b64decode).splitlines()
         | reject('match', '^Filename\s')
         | reject('equalto', '')
         | list
       }}
-    kubedo_fstab_swap_entries: >-
+    kube-do_fstab_swap_entries: >-
       {{
-        (kubedo_fstab_content.content | default('') | b64decode).splitlines()
+        (kube-do_fstab_content.content | default('') | b64decode).splitlines()
         | reject('match', '^\s*#')
         | select('search', '^\s*\S+\s+\S+\s+swap(?:\s+|$)')
         | list
       }}
-    kubedo_unmasked_swap_units: >-
+    kube-do_unmasked_swap_units: >-
       {{
-        kubedo_systemd_swap_unit_files_after.stdout_lines
+        kube-do_systemd_swap_unit_files_after.stdout_lines
         | select('search', '\.swap\s+')
         | reject('search', '\s+masked\s+')
         | list
       }}
-    kubedo_active_swap_unit_names: >-
+    kube-do_active_swap_unit_names: >-
       {{
-        kubedo_active_systemd_swap_units.stdout_lines
+        kube-do_active_systemd_swap_units.stdout_lines
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | select('match', '^\S+\.swap$')
         | list
       }}
-    kubedo_active_zram_service_names: >-
+    kube-do_active_zram_service_names: >-
       {{
-        kubedo_active_zram_services.stdout_lines
+        kube-do_active_zram_services.stdout_lines
         | map('regex_replace', '^\s*(\S+).*$', '\1')
         | select('search', 'zram')
         | select('match', '^\S+\.service$')
         | list
       }}
-    kubedo_unmasked_zram_services: >-
+    kube-do_unmasked_zram_services: >-
       {{
-        kubedo_systemd_service_unit_files_after.stdout_lines
+        kube-do_systemd_service_unit_files_after.stdout_lines
         | select('search', 'zram')
         | select('search', '\.service\s+')
         | reject('search', '\s+masked\s+')
@@ -302,17 +302,17 @@
 - name: Assert swap is fully disabled
   ansible.builtin.assert:
     that:
-      - kubedo_active_swap_entries | length == 0
-      - kubedo_fstab_swap_entries | default([]) | length == 0
-      - kubedo_unmasked_swap_units | length == 0
-      - kubedo_active_swap_unit_names | length == 0
-      - kubedo_active_zram_service_names | length == 0
-      - kubedo_unmasked_zram_services | length == 0
+      - kube-do_active_swap_entries | length == 0
+      - kube-do_fstab_swap_entries | default([]) | length == 0
+      - kube-do_unmasked_swap_units | length == 0
+      - kube-do_active_swap_unit_names | length == 0
+      - kube-do_active_zram_service_names | length == 0
+      - kube-do_unmasked_zram_services | length == 0
     fail_msg: >-
-      swap is still configured: active={{ kubedo_active_swap_entries | join(', ') }},
-      fstab={{ kubedo_fstab_swap_entries | default([]) | join(' | ') }},
-      swap_units={{ kubedo_unmasked_swap_units | join(' | ') }},
-      active_swap_units={{ kubedo_active_swap_unit_names | join(', ') }},
-      active_zram_services={{ kubedo_active_zram_service_names | join(', ') }},
-      zram_units={{ kubedo_unmasked_zram_services | join(' | ') }}
+      swap is still configured: active={{ kube-do_active_swap_entries | join(', ') }},
+      fstab={{ kube-do_fstab_swap_entries | default([]) | join(' | ') }},
+      swap_units={{ kube-do_unmasked_swap_units | join(' | ') }},
+      active_swap_units={{ kube-do_active_swap_unit_names | join(', ') }},
+      active_zram_services={{ kube-do_active_zram_service_names | join(', ') }},
+      zram_units={{ kube-do_unmasked_zram_services | join(' | ') }}
   when: not ansible_check_mode

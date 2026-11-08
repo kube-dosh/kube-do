@@ -12,17 +12,17 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kubedo/kubedo/internal/check"
-	"github.com/kubedo/kubedo/internal/cluster"
-	"github.com/kubedo/kubedo/internal/download"
-	"github.com/kubedo/kubedo/internal/install"
-	"github.com/kubedo/kubedo/internal/layout"
-	"github.com/kubedo/kubedo/internal/manifest"
-	"github.com/kubedo/kubedo/internal/registry"
-	"github.com/kubedo/kubedo/internal/render"
-	"github.com/kubedo/kubedo/internal/serve"
-	"github.com/kubedo/kubedo/internal/version"
-	"github.com/kubedo/kubedo/manifests"
+	"github.com/kube-dosh/kube-do/internal/check"
+	"github.com/kube-dosh/kube-do/internal/cluster"
+	"github.com/kube-dosh/kube-do/internal/download"
+	"github.com/kube-dosh/kube-do/internal/install"
+	"github.com/kube-dosh/kube-do/internal/layout"
+	"github.com/kube-dosh/kube-do/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/registry"
+	"github.com/kube-dosh/kube-do/internal/render"
+	"github.com/kube-dosh/kube-do/internal/serve"
+	"github.com/kube-dosh/kube-do/internal/version"
+	"github.com/kube-dosh/kube-do/manifests"
 )
 
 func newVersionCmd() *cobra.Command {
@@ -291,7 +291,7 @@ func newInstallCmd() *cobra.Command {
 }
 
 func defaultAnsibleDir() string {
-	if dir := os.Getenv("KUBEDO_ANSIBLE_DIR"); dir != "" {
+	if dir := os.Getenv("KUBE_DO_ANSIBLE_DIR"); dir != "" {
 		return dir
 	}
 	return "ansible"
@@ -403,11 +403,11 @@ func newRegistryCmd() *cobra.Command {
 }
 
 func defaultCacheDir() string {
-	if d := os.Getenv("KUBEDO_CACHE_DIR"); d != "" {
+	if d := os.Getenv("KUBE_DO_CACHE_DIR"); d != "" {
 		return d
 	}
 	if d, err := os.UserCacheDir(); err == nil {
-		return filepath.Join(d, "kubedo")
+		return filepath.Join(d, "kube-do")
 	}
-	return filepath.Join(".", ".kubedo")
+	return filepath.Join(".", ".kube-do")
 }

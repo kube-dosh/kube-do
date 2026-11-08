@@ -7,14 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubedo/kubedo/internal/cluster"
-	"github.com/kubedo/kubedo/internal/layout"
-	"github.com/kubedo/kubedo/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/cluster"
+	"github.com/kube-dosh/kube-do/internal/layout"
+	"github.com/kube-dosh/kube-do/internal/manifest"
 )
 
 func testInputs(t *testing.T) (*cluster.Config, *manifest.Manifest) {
 	t.Helper()
-	cfg, err := cluster.Parse([]byte(`apiVersion: kubedo.io/v1alpha1
+	cfg, err := cluster.Parse([]byte(`apiVersion: kube-do.io/v1alpha1
 kind: ClusterConfig
 metadata:
   name: test
@@ -39,7 +39,7 @@ cni:
 		Metadata: manifest.Metadata{Name: "test-build", KubernetesVersion: "v1.36.5"},
 		Spec: manifest.Spec{
 			Platforms: []manifest.Platform{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}},
-			Registry:  manifest.Registry{Namespace: "kubedo"},
+			Registry:  manifest.Registry{Namespace: "kube-do"},
 			Installer: manifest.Installer{},
 			Binaries: []manifest.Binary{
 				{Name: "kubeadm", Version: "v1.36.5", OS: "linux", Arch: "amd64", URL: "https://example.com/kubeadm", SHA256: strings.Repeat("a", 64)},

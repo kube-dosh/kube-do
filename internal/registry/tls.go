@@ -21,7 +21,7 @@ func GenerateSelfSigned(host string) (caPEM, certPEM, keyPEM []byte, err error) 
 	}
 	caTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "kubedo-registry-ca", Organization: []string{"kubedo"}},
+		Subject:               pkix.Name{CommonName: "kube-do-registry-ca", Organization: []string{"kube-do"}},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
@@ -43,7 +43,7 @@ func GenerateSelfSigned(host string) (caPEM, certPEM, keyPEM []byte, err error) 
 	}
 	serverTemplate := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: host, Organization: []string{"kubedo"}},
+		Subject:               pkix.Name{CommonName: host, Organization: []string{"kube-do"}},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(2, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

@@ -6,15 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubedo/kubedo/internal/manifest"
-	"github.com/kubedo/kubedo/manifests"
+	"github.com/kube-dosh/kube-do/internal/manifest"
+	"github.com/kube-dosh/kube-do/manifests"
 )
 
 const testSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 func baseManifest(t *testing.T) *manifest.Manifest {
 	t.Helper()
-	m, err := manifests.Get("v1.36.5-kubedo.1")
+	m, err := manifests.Get("v1.36.5-kube-do.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,9 +27,9 @@ func TestDefaultBuildName(t *testing.T) {
 		k8s  string
 		want string
 	}{
-		{"v1.36.5-kubedo.1", "v1.36.5", "v1.36.5-kubedo.2"},
-		{"v1.36.5-kubedo.7", "1.36.5", "v1.36.5-kubedo.8"},
-		{"v1.36.5-kubedo.1", "v1.37.1", "v1.37.1-kubedo.1"},
+		{"v1.36.5-kube-do.1", "v1.36.5", "v1.36.5-kube-do.2"},
+		{"v1.36.5-kube-do.7", "1.36.5", "v1.36.5-kube-do.8"},
+		{"v1.36.5-kube-do.1", "v1.37.1", "v1.37.1-kube-do.1"},
 	}
 	for _, tc := range cases {
 		if got := DefaultBuildName(tc.base, tc.k8s); got != tc.want {
@@ -70,7 +70,7 @@ func TestRunBumpsContainerd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Build != "v1.36.5-kubedo.2" {
+	if result.Build != "v1.36.5-kube-do.2" {
 		t.Fatalf("build = %q", result.Build)
 	}
 	for _, arch := range []string{"amd64", "arm64"} {
@@ -169,7 +169,7 @@ func TestRunBumpsKubernetesAndImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Build != "v1.37.1-kubedo.1" || result.Manifest.Metadata.KubernetesVersion != "v1.37.1" {
+	if result.Build != "v1.37.1-kube-do.1" || result.Manifest.Metadata.KubernetesVersion != "v1.37.1" {
 		t.Fatalf("result metadata = %#v", result.Manifest.Metadata)
 	}
 	for _, name := range []string{"kubeadm", "kubelet", "kubectl"} {

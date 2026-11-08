@@ -101,10 +101,10 @@ func Build(opts Options) (v1.Image, error) {
 	config.Config.Entrypoint = []string{path.Join(binaryDir, opts.BinaryName)}
 	config.Config.WorkingDir = "/"
 	config.Config.Labels = map[string]string{
-		"org.opencontainers.image.title":     "kubedo " + opts.BinaryName + " runtime",
-		"org.opencontainers.image.version":   opts.Version,
-		"io.kubedo.installer.binary":         opts.BinaryName,
-		"io.kubedo.installer.binary.version": opts.Version,
+		"org.opencontainers.image.title":      "kube-do " + opts.BinaryName + " runtime",
+		"org.opencontainers.image.version":    opts.Version,
+		"io.kube-do.installer.binary":         opts.BinaryName,
+		"io.kube-do.installer.binary.version": opts.Version,
 	}
 	image, err = mutate.ConfigFile(image, config)
 	if err != nil {

@@ -12,33 +12,33 @@
 
 - name: Resolve HA Artifacts
   ansible.builtin.set_fact:
-    kubedo_haproxy_image: "{{ installer_images | selectattr('name', 'equalto', 'haproxy') | first }}"
-    kubedo_keepalived_image: "{{ installer_images | selectattr('name', 'equalto', 'keepalived') | first }}"
+    kube-do_haproxy_image: "{{ installer_images | selectattr('name', 'equalto', 'haproxy') | first }}"
+    kube-do_keepalived_image: "{{ installer_images | selectattr('name', 'equalto', 'keepalived') | first }}"
 
 - name: Assert that ctr is available for the HA containers
   ansible.builtin.command: /usr/local/bin/ctr --version
   changed_when: false
 
 - name: Determine the interface that owns the node address
-  ansible.builtin.command: "ip -o -4 addr show to {{ kubedo_node_ip }}"
-  register: kubedo_node_interface_addr
+  ansible.builtin.command: "ip -o -4 addr show to {{ kube-do_node_ip }}"
+  register: kube-do_node_interface_addr
   changed_when: false
 
 - name: Assert that the node address maps to exactly one non-loopback interface
   ansible.builtin.assert:
     that:
-      - kubedo_node_interface_addr.stdout_lines | length == 1
-      - kubedo_node_interface_addr.stdout is search('\\binet\\s+' ~ (kubedo_node_ip | regex_escape) ~ '/')
-      - (kubedo_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first) != 'lo'
+      - kube-do_node_interface_addr.stdout_lines | length == 1
+      - kube-do_node_interface_addr.stdout is search('\\binet\\s+' ~ (kube-do_node_ip | regex_escape) ~ '/')
+      - (kube-do_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first) != 'lo'
     fail_msg: >-
-      The node address {{ kubedo_node_ip }} must be assigned exactly once to a
-      non-loopback interface; found: {{ kubedo_node_interface_addr.stdout | default('nothing') }}
+      The node address {{ kube-do_node_ip }} must be assigned exactly once to a
+      non-loopback interface; found: {{ kube-do_node_interface_addr.stdout | default('nothing') }}
 
 - name: Record VIP networking facts
   ansible.builtin.set_fact:
-    kubedo_vip_interface: "{{ kubedo_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first }}"
-    kubedo_vip_prefix: "{{ kubedo_node_interface_addr.stdout | regex_search('inet\\s+[0-9.]+/(\\d+)', '\\1') | first }}"
-    kubedo_vrrp_priority: "{{ 200 - (groups['control_plane'].index(inventory_hostname) | int) }}"
+    kube-do_vip_interface: "{{ kube-do_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first }}"
+    kube-do_vip_prefix: "{{ kube-do_node_interface_addr.stdout | regex_search('inet\\s+[0-9.]+/(\\d+)', '\\1') | first }}"
+    kube-do_vrrp_priority: "{{ 200 - (groups['control_plane'].index(inventory_hostname) | int) }}"
 
 - name: Create HA configuration directories
   ansible.builtin.file:
@@ -50,7 +50,7 @@
     - /etc/keepalived
     - /run/haproxy
     - /run/keepalived
-    - /var/log/kubedo
+    - /var/log/kube-do
     - /usr/local/libexec
 
 - name: Install the HAProxy configuration
@@ -62,15 +62,15 @@
 
 - name: Install the HAProxy container launcher
   ansible.builtin.template:
-    src: kubedo-haproxy.sh.j2
-    dest: /usr/local/libexec/kubedo-haproxy
+    src: kube-do-haproxy.sh.j2
+    dest: /usr/local/libexec/kube-do-haproxy
     mode: '0755'
   notify: Restart HAProxy
 
 - name: Install the HAProxy container systemd unit
   ansible.builtin.template:
-    src: kubedo-haproxy.service.j2
-    dest: /etc/systemd/system/kubedo-haproxy.service
+    src: kube-do-haproxy.service.j2
+    dest: /etc/systemd/system/kube-do-haproxy.service
     mode: '0644'
   notify:
     - Reload HA units
@@ -81,12 +81,12 @@
     argv:
       - /usr/local/bin/ctr
       - --namespace
-      - kubedo
+      - kube-do
       - images
       - pull
       - --hosts-dir
       - /etc/containerd/certs.d
-      - "{{ kubedo_haproxy_image.target }}"
+      - "{{ kube-do_haproxy_image.target }}"
   changed_when: false
 
 - name: Validate the HAProxy configuration in its container
@@ -94,13 +94,13 @@
     argv:
       - /usr/local/bin/ctr
       - --namespace
-      - kubedo
+      - kube-do
       - run
       - --rm
       - --net-host
       - --mount
       - type=bind,src=/etc/haproxy,dst=/etc/haproxy,options=rbind:ro
-      - "{{ kubedo_haproxy_image.target }}"
+      - "{{ kube-do_haproxy_image.target }}"
       - haproxy-validate
       - /usr/local/sbin/haproxy
       - -c
@@ -127,18 +127,18 @@
     - /etc/systemd/system/keepalived.service
     - /usr/local/sbin/haproxy
     - /usr/local/sbin/keepalived
-    - /usr/local/bin/kubedo-check-haproxy
+    - /usr/local/bin/kube-do-check-haproxy
     - /run/haproxy.pid
     - /run/keepalived.pid
-    - /var/cache/kubedo/haproxy
-    - /var/cache/kubedo/haproxy.sha256
-    - /var/cache/kubedo/keepalived
-    - /var/cache/kubedo/keepalived.sha256
+    - /var/cache/kube-do/haproxy
+    - /var/cache/kube-do/haproxy.sha256
+    - /var/cache/kube-do/keepalived
+    - /var/cache/kube-do/keepalived.sha256
   notify: Reload HA units
 
 - name: Enable and start the HAProxy container
   ansible.builtin.systemd:
-    name: kubedo-haproxy
+    name: kube-do-haproxy
     enabled: true
     state: started
     daemon_reload: true
@@ -147,10 +147,10 @@
   ansible.builtin.meta: flush_handlers
 
 - name: Wait for the HAProxy container task
-  ansible.builtin.command: /usr/local/bin/ctr --namespace kubedo tasks ps haproxy
-  register: kubedo_haproxy_task
+  ansible.builtin.command: /usr/local/bin/ctr --namespace kube-do tasks ps haproxy
+  register: kube-do_haproxy_task
   changed_when: false
-  until: kubedo_haproxy_task.rc == 0
+  until: kube-do_haproxy_task.rc == 0
   retries: 20
   delay: 2
 
@@ -163,15 +163,15 @@
 
 - name: Install the keepalived container launcher
   ansible.builtin.template:
-    src: kubedo-keepalived.sh.j2
-    dest: /usr/local/libexec/kubedo-keepalived
+    src: kube-do-keepalived.sh.j2
+    dest: /usr/local/libexec/kube-do-keepalived
     mode: '0755'
   notify: Restart keepalived
 
 - name: Install the keepalived container systemd unit
   ansible.builtin.template:
-    src: kubedo-keepalived.service.j2
-    dest: /etc/systemd/system/kubedo-keepalived.service
+    src: kube-do-keepalived.service.j2
+    dest: /etc/systemd/system/kube-do-keepalived.service
     mode: '0644'
   notify:
     - Reload HA units
@@ -182,24 +182,24 @@
 
 - name: Enable and start the keepalived container
   ansible.builtin.systemd:
-    name: kubedo-keepalived
+    name: kube-do-keepalived
     enabled: true
     state: started
     daemon_reload: true
 
 - name: Wait for the keepalived container task
-  ansible.builtin.command: /usr/local/bin/ctr --namespace kubedo tasks ps keepalived
-  register: kubedo_keepalived_task
+  ansible.builtin.command: /usr/local/bin/ctr --namespace kube-do tasks ps keepalived
+  register: kube-do_keepalived_task
   changed_when: false
-  until: kubedo_keepalived_task.rc == 0
+  until: kube-do_keepalived_task.rc == 0
   retries: 20
   delay: 2
 
 - name: Wait for the VIP to appear on the elected node
-  ansible.builtin.command: "ip -o -4 addr show dev {{ kubedo_vip_interface }}"
-  register: kubedo_vip_state
+  ansible.builtin.command: "ip -o -4 addr show dev {{ kube-do_vip_interface }}"
+  register: kube-do_vip_state
   changed_when: false
-  until: control_plane_vip in kubedo_vip_state.stdout
+  until: control_plane_vip in kube-do_vip_state.stdout
   retries: 20
   delay: 2
   when: inventory_hostname == groups['control_plane'][0]

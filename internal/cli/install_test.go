@@ -19,11 +19,11 @@ func TestInstallRendersAndInvokesAnsible(t *testing.T) {
 		t.Fatal(err)
 	}
 	configPath := filepath.Join(root, "cluster.yaml")
-	if err := os.WriteFile(configPath, []byte(`apiVersion: kubedo.io/v1alpha1
+	if err := os.WriteFile(configPath, []byte(`apiVersion: kube-do.io/v1alpha1
 kind: ClusterConfig
 metadata:
   name: test
-build: v1.36.5-kubedo.1
+build: v1.36.5-kube-do.1
 installer:
   address: 10.0.0.10
 registry:

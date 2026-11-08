@@ -1,4 +1,4 @@
-module github.com/kubedo/kubedo
+module github.com/kube-dosh/kube-do
 
 go 1.27
 

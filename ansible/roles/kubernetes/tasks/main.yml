@@ -1,9 +1,9 @@
 ---
 - name: Resolve Kubernetes Artifacts
   ansible.builtin.set_fact:
-    kubedo_kubeadm: "{{ binaries | selectattr('name', 'equalto', 'kubeadm') | first }}"
-    kubedo_kubelet: "{{ binaries | selectattr('name', 'equalto', 'kubelet') | first }}"
-    kubedo_kubectl: "{{ binaries | selectattr('name', 'equalto', 'kubectl') | first }}"
+    kube-do_kubeadm: "{{ binaries | selectattr('name', 'equalto', 'kubeadm') | first }}"
+    kube-do_kubelet: "{{ binaries | selectattr('name', 'equalto', 'kubelet') | first }}"
+    kube-do_kubectl: "{{ binaries | selectattr('name', 'equalto', 'kubectl') | first }}"
 
 - name: Install Kubernetes binaries
   ansible.builtin.get_url:
@@ -12,9 +12,9 @@
     checksum: "{{ ('sha256:' ~ item.sha256) if item.sha256 | default('') else omit }}"
     mode: '0755'
   loop:
-    - "{{ kubedo_kubeadm }}"
-    - "{{ kubedo_kubelet }}"
-    - "{{ kubedo_kubectl }}"
+    - "{{ kube-do_kubeadm }}"
+    - "{{ kube-do_kubelet }}"
+    - "{{ kube-do_kubectl }}"
   loop_control:
     label: "{{ item.name }}"
 

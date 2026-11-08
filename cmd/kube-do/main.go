@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kubedo/kubedo/internal/cli"
+	"github.com/kube-dosh/kube-do/internal/cli"
 )
 
 func main() {

@@ -1,4 +1,4 @@
-// Package serve implements `kubedo serve`, the Download Server.
+// Package serve implements `kube-do serve`, the Download Server.
 package serve
 
 import (

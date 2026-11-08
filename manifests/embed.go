@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kubedo/kubedo/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/manifest"
 )
 
 //go:embed builds/*.yaml
@@ -33,7 +33,7 @@ func Names() ([]string, error) {
 	return names, nil
 }
 
-var buildNameRe = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)-kubedo\.(\d+)$`)
+var buildNameRe = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)-kube-do\.(\d+)$`)
 
 func sortBuildNames(names []string) {
 	sort.Slice(names, func(i, j int) bool {

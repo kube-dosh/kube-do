@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	APIVersion = "kubedo.io/v1alpha1"
+	APIVersion = "kube-do.io/v1alpha1"
 	Kind       = "ClusterConfig"
 
 	OSFamilyRHEL   = "rhel"
@@ -30,7 +30,7 @@ const (
 	TLSModeSelfSigned = "selfSigned"
 	TLSModeProvided   = "provided"
 
-	DefaultRegistryCAPath = "/etc/kubedo/registry/tls/ca.crt"
+	DefaultRegistryCAPath = "/etc/kube-do/registry/tls/ca.crt"
 )
 
 var (
@@ -179,7 +179,7 @@ func (c *Config) Default() {
 		c.SSH.Port = 22
 	}
 	if c.Registry.DataDir == "" {
-		c.Registry.DataDir = "/var/lib/kubedo/registry"
+		c.Registry.DataDir = "/var/lib/kube-do/registry"
 	}
 	if c.Registry.TLS.Mode == "" {
 		c.Registry.TLS.Mode = TLSModeSelfSigned
@@ -191,7 +191,7 @@ func (c *Config) Default() {
 		c.ControlPlane.VRRP.RouterID = 51
 	}
 	if c.ControlPlane.VRRP.Password == "" {
-		c.ControlPlane.VRRP.Password = "kubedo"
+		c.ControlPlane.VRRP.Password = "kube-do"
 	}
 	if c.CNI.Name == "" {
 		c.CNI.Name = "cilium"
@@ -212,7 +212,7 @@ func (c *Config) KubeProxyReplacementEnabled() bool {
 	return c.CNI.KubeProxyReplacement == nil || *c.CNI.KubeProxyReplacement
 }
 
-// DownloadBaseURL is the base URL served by `kubedo serve`.
+// DownloadBaseURL is the base URL served by `kube-do serve`.
 func (c *Config) DownloadBaseURL() string {
 	return "http://" + net.JoinHostPort(c.Installer.Address, strconv.Itoa(c.Installer.DownloadPort))
 }
@@ -228,7 +228,7 @@ func (c *Config) ControlPlaneAddress() string {
 }
 
 // RegistryCAPath is the CA nodes must trust to pull images. In self-signed
-// mode it is the path written by `kubedo registry`.
+// mode it is the path written by `kube-do registry`.
 func (c *Config) RegistryCAPath() string {
 	switch c.Registry.TLS.Mode {
 	case TLSModeSelfSigned:

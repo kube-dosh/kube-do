@@ -20,22 +20,22 @@ ipv6:
   enabled: false
 
 image:
-  repository: {{ kubedo_cilium_image.repository }}
-  tag: {{ kubedo_cilium_image.tag }}
+  repository: {{ kube-do_cilium_image.repository }}
+  tag: {{ kube-do_cilium_image.tag }}
   useDigest: false
   pullPolicy: IfNotPresent
 
 operator:
   image:
     repository: {{ registry_address }}/{{ registry_namespace }}/cilium/operator
-    tag: {{ kubedo_operator_image.tag }}
+    tag: {{ kube-do_operator_image.tag }}
     useDigest: false
   replicas: 2
 
 envoy:
   image:
-    repository: {{ kubedo_envoy_image.repository }}
-    tag: {{ kubedo_envoy_image.tag }}
+    repository: {{ kube-do_envoy_image.repository }}
+    tag: {{ kube-do_envoy_image.tag }}
     useDigest: false
 
 hubble:
@@ -45,16 +45,16 @@ hubble:
   relay:
     enabled: true
     image:
-      repository: {{ kubedo_relay_image.repository }}
-      tag: {{ kubedo_relay_image.tag }}
+      repository: {{ kube-do_relay_image.repository }}
+      tag: {{ kube-do_relay_image.tag }}
       useDigest: false
   ui:
     enabled: false
 
 certgen:
   image:
-    repository: {{ kubedo_certgen_image.repository }}
-    tag: {{ kubedo_certgen_image.tag }}
+    repository: {{ kube-do_certgen_image.repository }}
+    tag: {{ kube-do_certgen_image.tag }}
     useDigest: false
 
 preflight:

@@ -1,58 +1,58 @@
 ---
 - name: Resolve Cilium Artifacts
   ansible.builtin.set_fact:
-    kubedo_helm: "{{ binaries | selectattr('name', 'equalto', 'helm') | first }}"
-    kubedo_cilium_chart: "{{ binaries | selectattr('name', 'equalto', 'cilium-chart') | first }}"
-    kubedo_cilium_image: "{{ images | selectattr('name', 'equalto', 'cilium') | first }}"
-    kubedo_operator_image: "{{ images | selectattr('name', 'equalto', 'cilium-operator') | first }}"
-    kubedo_envoy_image: "{{ images | selectattr('name', 'equalto', 'cilium-envoy') | first }}"
-    kubedo_relay_image: "{{ images | selectattr('name', 'equalto', 'hubble-relay') | first }}"
-    kubedo_certgen_image: "{{ images | selectattr('name', 'equalto', 'certgen') | first }}"
+    kube-do_helm: "{{ binaries | selectattr('name', 'equalto', 'helm') | first }}"
+    kube-do_cilium_chart: "{{ binaries | selectattr('name', 'equalto', 'cilium-chart') | first }}"
+    kube-do_cilium_image: "{{ images | selectattr('name', 'equalto', 'cilium') | first }}"
+    kube-do_operator_image: "{{ images | selectattr('name', 'equalto', 'cilium-operator') | first }}"
+    kube-do_envoy_image: "{{ images | selectattr('name', 'equalto', 'cilium-envoy') | first }}"
+    kube-do_relay_image: "{{ images | selectattr('name', 'equalto', 'hubble-relay') | first }}"
+    kube-do_certgen_image: "{{ images | selectattr('name', 'equalto', 'certgen') | first }}"
 
 - name: Create the Artifact cache
   ansible.builtin.file:
-    path: /var/cache/kubedo
+    path: /var/cache/kube-do
     state: directory
     mode: '0755'
 
 - name: Download Helm
   ansible.builtin.get_url:
-    url: "{{ kubedo_helm.url }}"
-    dest: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}.tar.gz"
-    checksum: "{{ ('sha256:' ~ kubedo_helm.sha256) if kubedo_helm.sha256 | default('') else omit }}"
+    url: "{{ kube-do_helm.url }}"
+    dest: "/var/cache/kube-do/helm-{{ kube-do_helm.version }}.tar.gz"
+    checksum: "{{ ('sha256:' ~ kube-do_helm.sha256) if kube-do_helm.sha256 | default('') else omit }}"
     mode: '0644'
 
 - name: Create the Helm staging directory
   ansible.builtin.file:
-    path: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}"
+    path: "/var/cache/kube-do/helm-{{ kube-do_helm.version }}"
     state: directory
     mode: '0755'
 
 - name: Extract Helm
   ansible.builtin.unarchive:
-    src: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}.tar.gz"
-    dest: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}"
+    src: "/var/cache/kube-do/helm-{{ kube-do_helm.version }}.tar.gz"
+    dest: "/var/cache/kube-do/helm-{{ kube-do_helm.version }}"
     remote_src: true
-    creates: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}/linux-{{ platform_arch }}/helm"
+    creates: "/var/cache/kube-do/helm-{{ kube-do_helm.version }}/linux-{{ platform_arch }}/helm"
 
 - name: Install Helm
   ansible.builtin.copy:
-    src: "/var/cache/kubedo/helm-{{ kubedo_helm.version }}/linux-{{ platform_arch }}/helm"
+    src: "/var/cache/kube-do/helm-{{ kube-do_helm.version }}/linux-{{ platform_arch }}/helm"
     dest: /usr/local/bin/helm
     remote_src: true
     mode: '0755'
 
 - name: Download the Cilium chart
   ansible.builtin.get_url:
-    url: "{{ kubedo_cilium_chart.url }}"
-    dest: "/var/cache/kubedo/cilium-{{ kubedo_cilium_chart.version }}.tgz"
-    checksum: "{{ ('sha256:' ~ kubedo_cilium_chart.sha256) if kubedo_cilium_chart.sha256 | default('') else omit }}"
+    url: "{{ kube-do_cilium_chart.url }}"
+    dest: "/var/cache/kube-do/cilium-{{ kube-do_cilium_chart.version }}.tgz"
+    checksum: "{{ ('sha256:' ~ kube-do_cilium_chart.sha256) if kube-do_cilium_chart.sha256 | default('') else omit }}"
     mode: '0644'
 
 - name: Render Cilium values
   ansible.builtin.template:
     src: values.yaml.j2
-    dest: /var/cache/kubedo/cilium-values.yaml
+    dest: /var/cache/kube-do/cilium-values.yaml
     mode: '0600'
 
 - name: Wait for the Kubernetes API before installing Cilium
@@ -64,11 +64,11 @@
       - --request-timeout=10s
       - get
       - --raw=/readyz
-  register: kubedo_cilium_api_ready
+  register: kube-do_cilium_api_ready
   changed_when: false
   retries: 120
   delay: 5
-  until: kubedo_cilium_api_ready.rc == 0
+  until: kube-do_cilium_api_ready.rc == 0
 
 - name: Inspect the existing Cilium Helm release
   ansible.builtin.command:
@@ -82,7 +82,7 @@
       - /etc/kubernetes/admin.conf
       - --output
       - json
-  register: kubedo_cilium_release
+  register: kube-do_cilium_release
   changed_when: false
   failed_when: false
 
@@ -90,16 +90,16 @@
   ansible.builtin.assert:
     that:
       - >-
-        kubedo_cilium_release.rc == 0 or
-        'release: not found' in kubedo_cilium_release.stderr
+        kube-do_cilium_release.rc == 0 or
+        'release: not found' in kube-do_cilium_release.stderr
     fail_msg: >-
       failed to inspect the existing Cilium Helm release; refusing to treat an
       uncertain result as an absent release:
-      {{ kubedo_cilium_release.stderr | trim }}
+      {{ kube-do_cilium_release.stderr | trim }}
 
 - name: Record the existing Cilium Helm release status
   ansible.builtin.set_fact:
-    kubedo_cilium_release_status: "{{ ((kubedo_cilium_release.stdout | from_json).info.status) if kubedo_cilium_release.rc == 0 else 'absent' }}"
+    kube-do_cilium_release_status: "{{ ((kube-do_cilium_release.stdout | from_json).info.status) if kube-do_cilium_release.rc == 0 else 'absent' }}"
 
 - name: Remove an incomplete Cilium Helm release
   ansible.builtin.command:
@@ -114,8 +114,8 @@
       - --timeout
       - 5m
   when:
-    - kubedo_cilium_release.rc == 0
-    - kubedo_cilium_release_status not in ['deployed', 'uninstalled', 'uninstalling']
+    - kube-do_cilium_release.rc == 0
+    - kube-do_cilium_release_status not in ['deployed', 'uninstalled', 'uninstalling']
 
 - name: Wait for the incomplete Cilium Helm release to be removed
   ansible.builtin.command:
@@ -127,15 +127,15 @@
       - kube-system
       - --kubeconfig
       - /etc/kubernetes/admin.conf
-  register: kubedo_cilium_release_wait
+  register: kube-do_cilium_release_wait
   changed_when: false
   failed_when: false
   retries: 120
   delay: 5
-  until: kubedo_cilium_release_wait.rc != 0
+  until: kube-do_cilium_release_wait.rc != 0
   when:
-    - kubedo_cilium_release.rc == 0
-    - kubedo_cilium_release_status not in ['deployed', 'uninstalled']
+    - kube-do_cilium_release.rc == 0
+    - kube-do_cilium_release_status not in ['deployed', 'uninstalled']
 
 - name: Re-inspect the Cilium Helm release before installation
   ansible.builtin.command:
@@ -147,7 +147,7 @@
       - kube-system
       - --kubeconfig
       - /etc/kubernetes/admin.conf
-  register: kubedo_cilium_release_after_cleanup
+  register: kube-do_cilium_release_after_cleanup
   changed_when: false
   failed_when: false
 
@@ -155,11 +155,11 @@
   ansible.builtin.assert:
     that:
       - >-
-        kubedo_cilium_release_after_cleanup.rc == 0 or
-        'release: not found' in kubedo_cilium_release_after_cleanup.stderr
+        kube-do_cilium_release_after_cleanup.rc == 0 or
+        'release: not found' in kube-do_cilium_release_after_cleanup.stderr
     fail_msg: >-
       failed to re-inspect the Cilium Helm release:
-      {{ kubedo_cilium_release_after_cleanup.stderr | trim }}
+      {{ kube-do_cilium_release_after_cleanup.stderr | trim }}
 
 - name: Inspect the Cilium secrets namespace
   ansible.builtin.command:
@@ -172,38 +172,38 @@
       - cilium-secrets
       - --output
       - json
-  register: kubedo_cilium_namespace
+  register: kube-do_cilium_namespace
   changed_when: false
   failed_when: false
 
 - name: Assert the Cilium secrets namespace inspection was conclusive
   ansible.builtin.assert:
     that:
-      - kubedo_cilium_namespace.rc == 0 or 'not found' in kubedo_cilium_namespace.stderr
+      - kube-do_cilium_namespace.rc == 0 or 'not found' in kube-do_cilium_namespace.stderr
     fail_msg: >-
       failed to inspect the cilium-secrets namespace:
-      {{ kubedo_cilium_namespace.stderr | trim }}
+      {{ kube-do_cilium_namespace.stderr | trim }}
 
 - name: Initialize Cilium namespace cleanup state
   ansible.builtin.set_fact:
-    kubedo_cilium_namespace_cleanup: false
-    kubedo_cilium_namespace_orphaned: false
+    kube-do_cilium_namespace_cleanup: false
+    kube-do_cilium_namespace_orphaned: false
 
 - name: Detect a terminating Cilium secrets namespace
   ansible.builtin.set_fact:
-    kubedo_cilium_namespace_cleanup: true
+    kube-do_cilium_namespace_cleanup: true
   when:
-    - kubedo_cilium_namespace.rc == 0
-    - (kubedo_cilium_namespace.stdout | from_json).metadata.get('deletionTimestamp') is not none
+    - kube-do_cilium_namespace.rc == 0
+    - (kube-do_cilium_namespace.stdout | from_json).metadata.get('deletionTimestamp') is not none
 
 - name: Detect an orphaned Cilium secrets namespace
   ansible.builtin.set_fact:
-    kubedo_cilium_namespace_cleanup: true
-    kubedo_cilium_namespace_orphaned: true
+    kube-do_cilium_namespace_cleanup: true
+    kube-do_cilium_namespace_orphaned: true
   when:
-    - kubedo_cilium_namespace.rc == 0
-    - (kubedo_cilium_namespace.stdout | from_json).metadata.get('deletionTimestamp') is none
-    - kubedo_cilium_release_after_cleanup.rc != 0
+    - kube-do_cilium_namespace.rc == 0
+    - (kube-do_cilium_namespace.stdout | from_json).metadata.get('deletionTimestamp') is none
+    - kube-do_cilium_release_after_cleanup.rc != 0
 
 - name: Delete an orphaned Cilium secrets namespace
   ansible.builtin.command:
@@ -215,7 +215,7 @@
       - namespace
       - cilium-secrets
       - --wait=false
-  when: kubedo_cilium_namespace_orphaned
+  when: kube-do_cilium_namespace_orphaned
 
 - name: Wait for the Cilium secrets namespace to be removed
   ansible.builtin.command:
@@ -226,13 +226,13 @@
       - get
       - namespace
       - cilium-secrets
-  register: kubedo_cilium_namespace_wait
+  register: kube-do_cilium_namespace_wait
   changed_when: false
   failed_when: false
   retries: 120
   delay: 5
-  until: kubedo_cilium_namespace_wait.rc != 0
-  when: kubedo_cilium_namespace_cleanup
+  until: kube-do_cilium_namespace_wait.rc != 0
+  when: kube-do_cilium_namespace_cleanup
 
 - name: Install Cilium
   ansible.builtin.command:
@@ -241,13 +241,13 @@
       - upgrade
       - --install
       - cilium
-      - "/var/cache/kubedo/cilium-{{ kubedo_cilium_chart.version }}.tgz"
+      - "/var/cache/kube-do/cilium-{{ kube-do_cilium_chart.version }}.tgz"
       - --namespace
       - kube-system
       - --kubeconfig
       - /etc/kubernetes/admin.conf
       - --values
-      - /var/cache/kubedo/cilium-values.yaml
+      - /var/cache/kube-do/cilium-values.yaml
       - --atomic
       - --wait
       - --timeout

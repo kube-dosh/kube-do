@@ -22,8 +22,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 
-	"github.com/kubedo/kubedo/internal/layout"
-	"github.com/kubedo/kubedo/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/layout"
+	"github.com/kube-dosh/kube-do/internal/manifest"
 )
 
 func sourceArchive(t *testing.T) []byte {
@@ -62,7 +62,7 @@ func testManifest(binaries []manifest.Binary, images []manifest.Image) *manifest
 		Metadata: manifest.Metadata{Name: "test-build", KubernetesVersion: "v1.36.5"},
 		Spec: manifest.Spec{
 			Platforms: []manifest.Platform{{OS: "linux", Arch: "amd64"}},
-			Registry:  manifest.Registry{Namespace: "kubedo"},
+			Registry:  manifest.Registry{Namespace: "kube-do"},
 			Binaries:  binaries,
 			Images:    images,
 		},
@@ -269,7 +269,7 @@ func TestMirrorImage(t *testing.T) {
 		t.Fatalf("summary = %+v", sum)
 	}
 
-	dstRef, err := name.ParseReference(dstHost+"/kubedo/pause:v1", name.Insecure)
+	dstRef, err := name.ParseReference(dstHost+"/kube-do/pause:v1", name.Insecure)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +330,7 @@ func TestRunBuildsInstallerImage(t *testing.T) {
 	if !builderCalled || sum.Built != 1 || sum.Mirrored != 0 {
 		t.Fatalf("summary = %+v, builderCalled = %v", sum, builderCalled)
 	}
-	dstRef, err := name.ParseReference(dstHost+"/kubedo/keepalived:2.4.3-amd64", name.Insecure)
+	dstRef, err := name.ParseReference(dstHost+"/kube-do/keepalived:2.4.3-amd64", name.Insecure)
 	if err != nil {
 		t.Fatal(err)
 	}

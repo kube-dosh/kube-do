@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	APIVersion = "kubedo.io/v1alpha1"
+	APIVersion = "kube-do.io/v1alpha1"
 	Kind       = "ResourceManifest"
 
 	ArchiveNone  = ""
@@ -34,7 +34,7 @@ type Manifest struct {
 }
 
 type Metadata struct {
-	// Name is the Build identifier, e.g. v1.36.5-kubedo.1.
+	// Name is the Build identifier, e.g. v1.36.5-kube-do.1.
 	Name              string `yaml:"name"`
 	KubernetesVersion string `yaml:"kubernetesVersion"`
 }
@@ -115,7 +115,7 @@ func filterBinaries(binaries []Binary, os, arch string) []Binary {
 }
 
 type Registry struct {
-	// Namespace is the image namespace kubedo uses inside the private Registry.
+	// Namespace is the image namespace kube-do uses inside the private Registry.
 	Namespace string `yaml:"namespace"`
 }
 

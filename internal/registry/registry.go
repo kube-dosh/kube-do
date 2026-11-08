@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/kubedo/kubedo/internal/archive"
+	"github.com/kube-dosh/kube-do/internal/archive"
 )
 
 const (
@@ -89,7 +89,7 @@ func Ensure(ctx context.Context, opts Options) (Result, error) {
 		}
 	}
 	if opts.SourceArchive == "" {
-		return res, errors.New("registry binary archive is missing; run 'kubedo download --binaries-only' first")
+		return res, errors.New("registry binary archive is missing; run 'kube-do download --binaries-only' first")
 	}
 
 	switch opts.TLSMode {
@@ -150,8 +150,8 @@ func Ensure(ctx context.Context, opts Options) (Result, error) {
 	if err := runner("systemctl", "daemon-reload"); err != nil {
 		return res, fmt.Errorf("systemctl daemon-reload: %w", err)
 	}
-	if err := runner("systemctl", "enable", "--now", "kubedo-registry.service"); err != nil {
-		return res, fmt.Errorf("start kubedo-registry.service: %w", err)
+	if err := runner("systemctl", "enable", "--now", "kube-do-registry.service"); err != nil {
+		return res, fmt.Errorf("start kube-do-registry.service: %w", err)
 	}
 	if err := waitReady(ctx, opts, caFile); err != nil {
 		return res, err
@@ -249,7 +249,7 @@ func certificateUsable(caPath, certPath, keyPath, host string) bool {
 }
 
 func installBinary(archivePath, dest string) error {
-	tmp, err := os.MkdirTemp("", "kubedo-registry-bin-*")
+	tmp, err := os.MkdirTemp("", "kube-do-registry-bin-*")
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ http:
 // RenderUnit returns the systemd unit for the Registry.
 func RenderUnit(binPath, configPath string) []byte {
 	return []byte(fmt.Sprintf(`[Unit]
-Description=kubedo private container registry
+Description=kube-do private container registry
 After=network-online.target
 Wants=network-online.target
 
@@ -326,21 +326,21 @@ func (o Options) configPath() string {
 	if o.DryRun {
 		return filepath.Join(o.OutputDir, "config.yml")
 	}
-	return "/etc/kubedo/registry/config.yml"
+	return "/etc/kube-do/registry/config.yml"
 }
 
 func (o Options) certDir() string {
 	if o.DryRun {
 		return filepath.Join(o.OutputDir, "tls")
 	}
-	return "/etc/kubedo/registry/tls"
+	return "/etc/kube-do/registry/tls"
 }
 
 func (o Options) unitPath() string {
 	if o.DryRun {
-		return filepath.Join(o.OutputDir, "kubedo-registry.service")
+		return filepath.Join(o.OutputDir, "kube-do-registry.service")
 	}
-	return "/etc/systemd/system/kubedo-registry.service"
+	return "/etc/systemd/system/kube-do-registry.service"
 }
 
 func writeFile(path string, data []byte, mode os.FileMode) error {

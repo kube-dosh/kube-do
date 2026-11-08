@@ -29,10 +29,10 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 
-	"github.com/kubedo/kubedo/internal/archive"
-	"github.com/kubedo/kubedo/internal/imagebuild"
-	"github.com/kubedo/kubedo/internal/layout"
-	"github.com/kubedo/kubedo/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/archive"
+	"github.com/kube-dosh/kube-do/internal/imagebuild"
+	"github.com/kube-dosh/kube-do/internal/layout"
+	"github.com/kube-dosh/kube-do/internal/manifest"
 )
 
 type Options struct {
@@ -178,11 +178,11 @@ func verifiedCachedBinary(opts Options, binary manifest.Binary) (string, error) 
 	if binary.IsBuilt() {
 		sidecar, err := os.ReadFile(layout.BinaryChecksumPath(opts.CacheDir, opts.Manifest.Metadata.Name, binary))
 		if err != nil {
-			return "", fmt.Errorf("Installer image requires the built binary %q; run 'kubedo download --binaries-only' first: %w", binary.Name, err)
+			return "", fmt.Errorf("Installer image requires the built binary %q; run 'kube-do download --binaries-only' first: %w", binary.Name, err)
 		}
 		fields := strings.Fields(string(sidecar))
 		if len(fields) == 0 {
-			return "", fmt.Errorf("checksum sidecar for %q is empty; rerun 'kubedo download --binaries-only'", binary.Name)
+			return "", fmt.Errorf("checksum sidecar for %q is empty; rerun 'kube-do download --binaries-only'", binary.Name)
 		}
 		want = fields[0]
 	}
@@ -191,7 +191,7 @@ func verifiedCachedBinary(opts Options, binary manifest.Binary) (string, error) 
 		return "", fmt.Errorf("verify cached binary %q: %w", binary.Name, err)
 	}
 	if !ok {
-		return "", fmt.Errorf("Installer image requires a verified cached binary %q; run 'kubedo download --binaries-only' first", binary.Name)
+		return "", fmt.Errorf("Installer image requires a verified cached binary %q; run 'kube-do download --binaries-only' first", binary.Name)
 	}
 	return binaryPath, nil
 }
@@ -290,7 +290,7 @@ func buildBinary(ctx context.Context, opts Options, b manifest.Binary) (bool, er
 		}
 	}
 
-	buildDir, err := os.MkdirTemp("", "kubedo-build-*")
+	buildDir, err := os.MkdirTemp("", "kube-do-build-*")
 	if err != nil {
 		return false, err
 	}

@@ -1,11 +1,11 @@
-# kubedo
+# kube-do
 
-kubedo 是一个在离线（air-gapped）环境中安装 Kubernetes 集群的工程：由 `kubedo` 程序准备并分发资源，由 Ansible 编排安装。
+kube-do 是一个在离线（air-gapped）环境中安装 Kubernetes 集群的工程：由 `kube-do` 程序准备并分发资源，由 Ansible 编排安装。
 
 ## Language
 
 **Build（构建版本）**:
-整套离线资源的一次发布号（如 `v1.36.5-kubedo.1`）。切换 Build 意味着整套资源版本的升级。
+整套离线资源的一次发布号（如 `v1.36.5-kube-do.1`）。切换 Build 意味着整套资源版本的升级。
 _Avoid_: 版本号、release、tag
 
 **Resource Manifest（资源清单）**:

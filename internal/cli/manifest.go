@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/kubedo/kubedo/internal/bump"
-	"github.com/kubedo/kubedo/internal/manifest"
-	"github.com/kubedo/kubedo/manifests"
+	"github.com/kube-dosh/kube-do/internal/bump"
+	"github.com/kube-dosh/kube-do/internal/manifest"
+	"github.com/kube-dosh/kube-do/manifests"
 )
 
 func newManifestCmd() *cobra.Command {

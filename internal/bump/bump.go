@@ -23,8 +23,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/kubedo/kubedo/internal/archive"
-	"github.com/kubedo/kubedo/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/archive"
+	"github.com/kube-dosh/kube-do/internal/manifest"
 )
 
 type Versions struct {
@@ -62,7 +62,7 @@ type Result struct {
 	Changes  []string
 }
 
-var buildSuffixRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+-kubedo\.([0-9]+)$`)
+var buildSuffixRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+-kube-do\.([0-9]+)$`)
 
 // Run applies version overrides to Base and returns a validated new Build.
 func Run(ctx context.Context, opts Options) (*Result, error) {
@@ -161,7 +161,7 @@ func applyKubernetes(ctx context.Context, opts *Options, m *manifest.Manifest, r
 		return fmt.Errorf("resolving kubeadm images requires a kubeadm binary for Installer Host %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	kubeadmURL := fmt.Sprintf("https://dl.k8s.io/release/%s/bin/%s/%s/kubeadm", version, hostKubeadm.OS, hostKubeadm.Arch)
-	tmp, err := os.CreateTemp("", "kubedo-kubeadm-*")
+	tmp, err := os.CreateTemp("", "kube-do-kubeadm-*")
 	if err != nil {
 		return err
 	}
@@ -225,7 +225,7 @@ func applyCilium(ctx context.Context, opts *Options, m *manifest.Manifest, raw s
 		return fmt.Errorf("binary %q is not present in the base manifest", "cilium-chart")
 	}
 	chartURL := fmt.Sprintf("https://helm.cilium.io/cilium-%s.tgz", version)
-	tmp, err := os.CreateTemp("", "kubedo-cilium-*.tgz")
+	tmp, err := os.CreateTemp("", "kube-do-cilium-*.tgz")
 	if err != nil {
 		return err
 	}
@@ -439,7 +439,7 @@ func imageTag(ref string) string {
 }
 
 func ciliumChartTags(chartPath string) (envoy, certgen string, err error) {
-	dir, err := os.MkdirTemp("", "kubedo-cilium-chart-*")
+	dir, err := os.MkdirTemp("", "kube-do-cilium-chart-*")
 	if err != nil {
 		return "", "", err
 	}
@@ -486,7 +486,7 @@ func ciliumChartTags(chartPath string) (envoy, certgen string, err error) {
 // DefaultBuildName increments the .N suffix when Kubernetes stays on the same
 // minor/patch version, and starts at .1 for a new Kubernetes version.
 func DefaultBuildName(baseName, kubernetesVersion string) string {
-	prefix := fmt.Sprintf("v%s-kubedo.", trimV(kubernetesVersion))
+	prefix := fmt.Sprintf("v%s-kube-do.", trimV(kubernetesVersion))
 	if strings.HasPrefix(baseName, prefix) {
 		if match := buildSuffixRe.FindStringSubmatch(baseName); match != nil {
 			if n, err := strconv.Atoi(match[1]); err == nil {
