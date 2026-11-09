@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build release binaries
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      COMMIT: ${{ github.sha }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Build archives
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          safe_version="${RELEASE_TAG//\//_}"
+          build_date="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          ldflags="-s -w"
+          ldflags+=" -X github.com/kube-dosh/kube-do/internal/version.Version=${RELEASE_TAG}"
+          ldflags+=" -X github.com/kube-dosh/kube-do/internal/version.Commit=${COMMIT}"
+          ldflags+=" -X github.com/kube-dosh/kube-do/internal/version.Date=${build_date}"
+
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            name="kube-do_${safe_version}_linux_${arch}"
+            mkdir -p "dist/${name}"
+            CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build \
+              -trimpath \
+              -ldflags="${ldflags}" \
+              -o "dist/${name}/kube-do" \
+              ./cmd/kube-do
+            tar -C "dist/${name}" -czf "dist/${name}.tar.gz" kube-do
+          done
+
+          (cd dist && sha256sum ./*.tar.gz > checksums.txt)
+
+      - name: Upload release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${RELEASE_TAG}" dist/*.tar.gz dist/checksums.txt --clobber
