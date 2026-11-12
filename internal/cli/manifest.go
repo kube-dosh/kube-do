@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/kube-dosh/kube-do/internal/atomicfile"
 	"github.com/kube-dosh/kube-do/internal/bump"
 	"github.com/kube-dosh/kube-do/internal/manifest"
 	"github.com/kube-dosh/kube-do/manifests"
@@ -95,10 +96,7 @@ func newManifestBumpCmd() *cobra.Command {
 			} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
-			if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
-				return err
-			}
-			if err := os.WriteFile(outPath, body, 0o644); err != nil {
+			if err := atomicfile.Write(outPath, body, 0o644); err != nil {
 				return err
 			}
 			for _, change := range result.Changes {

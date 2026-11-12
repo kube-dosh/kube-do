@@ -145,6 +145,13 @@ func Parse(data []byte) (*Config, error) {
 		}
 		return nil, fmt.Errorf("decode cluster config: %w", err)
 	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("decode trailing cluster config document: %w", err)
+		}
+		return nil, errors.New("cluster config must contain exactly one YAML document")
+	}
 	c.Default()
 	if err := c.Validate(); err != nil {
 		return nil, err
@@ -407,6 +414,16 @@ func (c *Config) Validate() error {
 		(podNetwork.Contains(serviceNetwork.IP) || serviceNetwork.Contains(podNetwork.IP)) {
 		add("cni.podCIDR and cni.serviceCIDR must not overlap")
 	}
+	checkCIDRNodeCollisions(add, podNetwork, serviceNetwork, "controlPlane.nodes", c.ControlPlane.Nodes)
+	checkCIDRNodeCollisions(add, podNetwork, serviceNetwork, "workers", c.Workers)
+	if vip := net.ParseIP(c.ControlPlane.VIP); vip != nil && vip.To4() != nil {
+		if podNetwork != nil && podNetwork.Contains(vip) {
+			add("cni.podCIDR must not contain controlPlane.vip %q", c.ControlPlane.VIP)
+		}
+		if serviceNetwork != nil && serviceNetwork.Contains(vip) {
+			add("cni.serviceCIDR must not contain controlPlane.vip %q", c.ControlPlane.VIP)
+		}
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("invalid cluster config: %s", strings.Join(errs, "; "))
@@ -432,6 +449,21 @@ func validateIPv4CIDR(errs *[]string, name, value string) *net.IPNet {
 		return nil
 	}
 	return network
+}
+
+func checkCIDRNodeCollisions(add func(string, ...any), podNetwork, serviceNetwork *net.IPNet, where string, nodes []Node) {
+	for i, node := range nodes {
+		ip := net.ParseIP(node.Address)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		if podNetwork != nil && podNetwork.Contains(ip) {
+			add("%s[%d].address %q must not be inside cni.podCIDR", where, i, node.Address)
+		}
+		if serviceNetwork != nil && serviceNetwork.Contains(ip) {
+			add("%s[%d].address %q must not be inside cni.serviceCIDR", where, i, node.Address)
+		}
+	}
 }
 
 // ValidateURL is a hook used by tests and future commands.

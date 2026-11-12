@@ -2,6 +2,7 @@
 package render
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/kube-dosh/kube-do/internal/atomicfile"
 	"github.com/kube-dosh/kube-do/internal/cluster"
 	"github.com/kube-dosh/kube-do/internal/layout"
 	"github.com/kube-dosh/kube-do/internal/manifest"
@@ -16,6 +18,12 @@ import (
 
 // Render writes inventory.ini and group_vars/all.yml into outDir.
 func Render(cfg *cluster.Config, m *manifest.Manifest, outDir string) ([]string, error) {
+	if cfg == nil {
+		return nil, errors.New("cluster config is nil")
+	}
+	if m == nil {
+		return nil, errors.New("resource manifest is nil")
+	}
 	if err := os.MkdirAll(filepath.Join(outDir, "group_vars"), 0o755); err != nil {
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
@@ -26,10 +34,6 @@ func Render(cfg *cluster.Config, m *manifest.Manifest, outDir string) ([]string,
 	}
 
 	inventory := buildInventory(cfg)
-	if err := os.WriteFile(files[0], []byte(inventory), 0o644); err != nil {
-		return nil, fmt.Errorf("write inventory: %w", err)
-	}
-
 	vars, err := buildVars(cfg, m)
 	if err != nil {
 		return nil, err
@@ -38,8 +42,11 @@ func Render(cfg *cluster.Config, m *manifest.Manifest, outDir string) ([]string,
 	if err != nil {
 		return nil, fmt.Errorf("encode group vars: %w", err)
 	}
-	if err := os.WriteFile(files[1], body, 0o600); err != nil {
+	if err := atomicfile.Write(files[1], body, 0o600); err != nil {
 		return nil, fmt.Errorf("write group vars: %w", err)
+	}
+	if err := atomicfile.Write(files[0], []byte(inventory), 0o644); err != nil {
+		return nil, fmt.Errorf("write inventory: %w", err)
 	}
 	return files, nil
 }
@@ -64,7 +71,7 @@ func buildInventory(cfg *cluster.Config) string {
 }
 
 func writeNode(b *strings.Builder, cfg *cluster.Config, n cluster.Node) {
-	fmt.Fprintf(b, "%s ansible_host=%s ansible_user=%s ansible_port=%d kube-do_node_ip=%s",
+	fmt.Fprintf(b, "%s ansible_host=%s ansible_user=%s ansible_port=%d kube_do_node_ip=%s",
 		n.Name, n.Address, cfg.SSH.User, cfg.SSH.Port, n.Address)
 	if cfg.SSH.PrivateKeyFile != "" {
 		fmt.Fprintf(b, " ansible_ssh_private_key_file=%s", cfg.SSH.PrivateKeyFile)
@@ -109,7 +116,7 @@ type nodeVars struct {
 }
 
 type vars struct {
-	KubeDoBuild             string               `yaml:"kube-do_build"`
+	KubeDoBuild             string               `yaml:"kube_do_build"`
 	ClusterName             string               `yaml:"cluster_name"`
 	KubernetesVersion       string               `yaml:"kubernetes_version"`
 	PlatformOSFamily        string               `yaml:"platform_os_family"`

@@ -10,8 +10,8 @@
        ttl 30
     }
     prometheus :9153
-{% if kube-do_coredns_upstreams | length > 0 %}
-    forward . {{ kube-do_coredns_upstreams | join(' ') }} {
+{% if kube_do_coredns_upstreams | length > 0 %}
+    forward . {{ kube_do_coredns_upstreams | join(' ') }} {
        max_concurrent 1000
     }
     loop

@@ -83,6 +83,35 @@ func TestSelfSignedCertificateRegeneratesWhenHostChanges(t *testing.T) {
 	}
 }
 
+func TestSelfSignedCertificateRegenerationTightensKeyPermissions(t *testing.T) {
+	out := t.TempDir()
+	opts := Options{DryRun: true, OutputDir: out, TLSMode: TLSModeSelfSigned}
+	if err := writeSelfSigned(opts, "127.0.0.1", &Result{}); err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(out, "tls", "server.key")
+	if err := os.Chmod(keyPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSelfSigned(opts, "127.0.0.2", &Result{}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("server key mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestRenderUnitQuotesExecutablePaths(t *testing.T) {
+	unit := string(RenderUnit("/tmp/kube do/bin/registry", "/etc/kube do/config.yml"))
+	if !strings.Contains(unit, `ExecStart="/tmp/kube do/bin/registry" serve "/etc/kube do/config.yml"`) {
+		t.Fatalf("unit does not quote paths with spaces:\n%s", unit)
+	}
+}
+
 func TestEnsureDryRun(t *testing.T) {
 	archivePath := filepath.Join(t.TempDir(), "registry.tar.gz")
 	writeRegistryArchive(t, archivePath)
@@ -238,7 +267,7 @@ func TestEnsureDryRunUsesAbsolutePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantExec := "ExecStart=" + filepath.Join(out, "bin", "registry") + " serve " + filepath.Join(out, "config.yml")
+	wantExec := "ExecStart=" + systemdQuote(filepath.Join(out, "bin", "registry")) + " serve " + systemdQuote(filepath.Join(out, "config.yml"))
 	unit, err := os.ReadFile(filepath.Join(out, "kube-do-registry.service"))
 	if err != nil {
 		t.Fatal(err)

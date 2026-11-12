@@ -166,6 +166,7 @@ func (m *Manifest) Validate() error {
 	}
 
 	seenImages := map[string]bool{}
+	targetOwners := map[string]string{}
 	for i, img := range m.Spec.Images {
 		prefix := fmt.Sprintf("spec.images[%d] (%s)", i, img.Name)
 		if strings.TrimSpace(img.Name) == "" {
@@ -180,6 +181,10 @@ func (m *Manifest) Validate() error {
 		}
 		if err := validateImageRef(img.Target, true); err != nil {
 			add("%s: target: %v", prefix, err)
+		} else if previous, ok := targetOwners[img.Target]; ok {
+			add("%s: target %q is already used by %s", prefix, img.Target, previous)
+		} else {
+			targetOwners[img.Target] = prefix
 		}
 		if strings.HasPrefix(img.Target, "/") || strings.Contains(img.Target, "://") {
 			add("%s: target must be relative to the registry namespace", prefix)
@@ -188,7 +193,6 @@ func (m *Manifest) Validate() error {
 
 	seenInstallerImages := map[string]bool{}
 	installerImagesByPlatform := map[string]map[string]bool{}
-	installerTargets := map[string]string{}
 	type installerImageVersion struct {
 		version  string
 		platform string
@@ -214,10 +218,10 @@ func (m *Manifest) Validate() error {
 		if strings.HasPrefix(img.Target, "/") || strings.Contains(img.Target, "://") {
 			add("%s: target must be relative to the registry namespace", prefix)
 		}
-		if target, ok := installerTargets[img.Target]; ok {
+		if target, ok := targetOwners[img.Target]; ok {
 			add("%s: target %q is already used by %s", prefix, img.Target, target)
 		} else {
-			installerTargets[img.Target] = prefix
+			targetOwners[img.Target] = prefix
 		}
 		if !binaryNameRe.MatchString(img.Binary) {
 			add("%s: binary must be a safe binary name, got %q", prefix, img.Binary)

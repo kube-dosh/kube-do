@@ -12,9 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kube-dosh/kube-do/internal/archive"
+	"github.com/kube-dosh/kube-do/internal/atomicfile"
 )
 
 const (
@@ -312,7 +315,11 @@ LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
-`, binPath, configPath))
+`, systemdQuote(binPath), systemdQuote(configPath)))
+}
+
+func systemdQuote(value string) string {
+	return strconv.Quote(strings.ReplaceAll(value, "%", "%%"))
 }
 
 func (o Options) binaryPath() string {
@@ -344,10 +351,7 @@ func (o Options) unitPath() string {
 }
 
 func writeFile(path string, data []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, mode)
+	return atomicfile.Write(path, data, mode)
 }
 
 func fileExists(path string) bool {

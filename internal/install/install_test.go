@@ -42,6 +42,9 @@ func TestRunUsesRunner(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "site.yml"), []byte("---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "inventory.ini"), []byte("[all]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	var gotName string
 	var gotArgs []string
 	var stdout, stderr bytes.Buffer
@@ -49,6 +52,7 @@ func TestRunUsesRunner(t *testing.T) {
 		AnsibleDir: dir,
 		Playbook:   "site.yml",
 		Inventory:  "inventory.ini",
+		WorkingDir: dir,
 		Stdout:     &stdout,
 		Stderr:     &stderr,
 		LookPath:   func(string) (string, error) { return "/usr/bin/ansible-playbook", nil },
@@ -75,15 +79,41 @@ func TestRunRequiresAnsiblePlaybook(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "site.yml"), []byte("---\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	inventory := filepath.Join(dir, "inventory.ini")
+	if err := os.WriteFile(inventory, []byte("[all]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	err := Run(context.Background(), Options{
 		AnsibleDir: dir,
 		Playbook:   "site.yml",
-		Inventory:  "inventory.ini",
+		Inventory:  inventory,
 		LookPath: func(string) (string, error) {
 			return "", errors.New("not found")
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "ansible-playbook not found") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunRejectsMissingInventory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "site.yml"), []byte("---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Run(context.Background(), Options{
+		AnsibleDir: dir,
+		Playbook:   "site.yml",
+		Inventory:  filepath.Join(dir, "missing.ini"),
+		LookPath: func(string) (string, error) {
+			return "/usr/bin/ansible-playbook", nil
+		},
+		Runner: func(context.Context, string, []string, io.Writer, io.Writer) error {
+			t.Fatal("ansible runner must not be invoked with a missing inventory")
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "inventory") {
 		t.Fatalf("err = %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,6 +78,41 @@ func TestExtractTarGzRejectsTraversal(t *testing.T) {
 	writeTarGz(t, archivePath, []entry{{name: "../evil", body: "x"}})
 	if _, err := ExtractTarGz(archivePath, filepath.Join(dir, "out")); err == nil {
 		t.Fatal("expected traversal error")
+	}
+}
+
+func TestExtractTarGzRejectsDuplicateFilePaths(t *testing.T) {
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "a.tar.gz")
+	writeTarGz(t, archivePath, []entry{
+		{name: "bin/tool", body: "first"},
+		{name: "bin/tool", body: "second"},
+	})
+	if _, err := ExtractTarGz(archivePath, filepath.Join(dir, "out")); err == nil || !strings.Contains(err.Error(), "duplicate archive path") {
+		t.Fatalf("expected duplicate path error, got %v", err)
+	}
+}
+
+func TestExtractTarGzRejectsWritesThroughExistingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	outside := filepath.Join(dir, "outside")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(out, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(dir, "a.tar.gz")
+	writeTarGz(t, archivePath, []entry{{name: "escape/pwned", body: "payload"}})
+	if _, err := ExtractTarGz(archivePath, out); err == nil || !strings.Contains(err.Error(), "unsafe archive path") {
+		t.Fatalf("expected unsafe path error, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "pwned")); !os.IsNotExist(err) {
+		t.Fatalf("file escaped extraction root: %v", err)
 	}
 }
 

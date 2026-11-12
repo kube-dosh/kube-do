@@ -1,6 +1,9 @@
 package check
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -122,6 +125,75 @@ func TestRunRejectsInstallerHostArchitectureMismatch(t *testing.T) {
 	platform := find(results, "platform")
 	if platform == nil || platform.Status != StatusFail || !strings.Contains(platform.Detail, "Installer Host") {
 		t.Fatalf("platform result = %#v", platform)
+	}
+}
+
+func TestRunFailsWhenProvidedTLSFilesAreMissing(t *testing.T) {
+	cfg, m := testInputs(t)
+	cfg.Registry.TLS = cluster.TLS{
+		Mode:     cluster.TLSModeProvided,
+		CAFile:   "/missing/ca.crt",
+		CertFile: "/missing/server.crt",
+		KeyFile:  "/missing/server.key",
+	}
+	results := Run(Options{Config: cfg, Manifest: m, CacheDir: t.TempDir()})
+	inputs := find(results, "inputs")
+	if inputs == nil || inputs.Status != StatusFail || !strings.Contains(inputs.Detail, "registry.tls.caFile") {
+		t.Fatalf("inputs result = %#v", inputs)
+	}
+}
+
+func TestRunValidatesBuiltArtifactMetadata(t *testing.T) {
+	cfg, m := testInputs(t)
+	b := manifest.Binary{
+		Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64",
+		URL: "https://example.com/haproxy.tar.gz", Archive: manifest.ArchiveTarGz,
+		Build: manifest.BuildHAProxy, SourceSHA256: strings.Repeat("e", 64),
+	}
+	m.Spec.Binaries = nil
+	m.Spec.Installer.Binaries = []manifest.Binary{b}
+	cache := t.TempDir()
+	path := layout.BinaryPath(cache, m.Metadata.Name, b)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("built-haproxy")
+	if err := os.WriteFile(path, payload, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(payload)
+	outputSHA := hex.EncodeToString(sum[:])
+	if err := os.WriteFile(layout.BinaryChecksumPath(cache, m.Metadata.Name, b), []byte(outputSHA+"  haproxy\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(filepath.Dir(path), ".haproxy.build.json")
+	writeMarker := func(version string) {
+		t.Helper()
+		data, err := json.Marshal(buildMarker{
+			Recipe:       b.Build,
+			Version:      version,
+			SourceSHA256: b.SourceSHA256,
+			OutputSHA256: outputSHA,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(markerPath, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMarker(b.Version)
+	results := Run(Options{Config: cfg, Manifest: m, CacheDir: cache})
+	artifacts := find(results, "artifacts")
+	if artifacts == nil || artifacts.Status != StatusOK {
+		t.Fatalf("artifacts result = %#v", artifacts)
+	}
+
+	writeMarker("stale")
+	results = Run(Options{Config: cfg, Manifest: m, CacheDir: cache})
+	artifacts = find(results, "artifacts")
+	if artifacts == nil || artifacts.Status != StatusFail || !strings.Contains(artifacts.Detail, "invalid build metadata") {
+		t.Fatalf("artifacts result = %#v", artifacts)
 	}
 }
 

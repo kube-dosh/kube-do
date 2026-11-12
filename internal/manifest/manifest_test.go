@@ -48,6 +48,13 @@ func TestParseValid(t *testing.T) {
 	}
 }
 
+func TestParseRejectsMultipleYAMLDocuments(t *testing.T) {
+	_, err := Parse([]byte(validManifestYAML() + "---\nmetadata:\n  name: smuggled\n"))
+	if err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("expected multiple document error, got %v", err)
+	}
+}
+
 func TestValidateRejectsBadSHA(t *testing.T) {
 	_, err := Parse([]byte(strings.Replace(validManifestYAML(), testSHA, "not-a-sha", 1)))
 	if err == nil || !strings.Contains(err.Error(), "sha256") {
@@ -220,6 +227,45 @@ func TestValidateRejectsDuplicateImage(t *testing.T) {
 	_, err := Parse([]byte(bad))
 	if err == nil || !strings.Contains(err.Error(), "duplicate image name") {
 		t.Fatalf("expected duplicate error, got %v", err)
+	}
+}
+
+func TestValidateRejectsDuplicateImageTarget(t *testing.T) {
+	bad := strings.Replace(validManifestYAML(), `    - name: pause
+      source: registry.k8s.io/pause:3.10.2
+      target: pause:3.10.2`,
+		`    - name: pause
+      source: registry.k8s.io/pause:3.10.2
+      target: pause:3.10.2
+    - name: coredns
+      source: registry.k8s.io/coredns/coredns:v1.14.2
+      target: pause:3.10.2`, 1)
+	_, err := Parse([]byte(bad))
+	if err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("expected duplicate target error, got %v", err)
+	}
+}
+
+func TestValidateRejectsImageTargetCollidingWithInstallerImage(t *testing.T) {
+	bad := strings.Replace(validManifestYAML(), `  installer:
+    binaries: []`, `  installer:
+    binaries:
+      - name: registry
+        version: 3.1.2
+        os: linux
+        arch: amd64
+        url: https://example.com/registry
+        sha256: `+testSHA+`
+    images:
+      - name: registry-runtime
+        version: 3.1.2
+        os: linux
+        arch: amd64
+        target: pause:3.10.2
+        binary: registry`, 1)
+	_, err := Parse([]byte(bad))
+	if err == nil || !strings.Contains(err.Error(), "already used") {
+		t.Fatalf("expected cross-kind target collision error, got %v", err)
 	}
 }
 

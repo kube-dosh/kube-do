@@ -21,29 +21,29 @@
 
 - name: Select the root filesystem
   ansible.builtin.set_fact:
-    kube-do_root_filesystem: "{{ ansible_mounts | selectattr('mount', 'equalto', '/') | first }}"
-    kube-do_root_total_gib: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_total | int / 1073741824 | round(1) }}"
-    kube-do_root_available_gib: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_available | int / 1073741824 | round(1) }}"
+    kube_do_root_filesystem: "{{ ansible_mounts | selectattr('mount', 'equalto', '/') | first }}"
+    kube_do_root_total_gib: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_total | int / 1073741824 | round(1) }}"
+    kube_do_root_available_gib: "{{ (ansible_mounts | selectattr('mount', 'equalto', '/') | first).size_available | int / 1073741824 | round(1) }}"
 
 - name: Assert minimum root filesystem capacity
   ansible.builtin.assert:
     that:
-      - kube-do_root_filesystem.size_total | int >= kube-do_min_root_total_bytes
-      - kube-do_root_filesystem.size_available | int >= kube-do_min_root_available_bytes
+      - kube_do_root_filesystem.size_total | int >= kube_do_min_root_total_bytes
+      - kube_do_root_filesystem.size_available | int >= kube_do_min_root_available_bytes
     fail_msg: >-
-      the root filesystem has {{ kube-do_root_total_gib }} GiB total and
-      {{ kube-do_root_available_gib }} GiB available; Kubernetes control-plane
+      the root filesystem has {{ kube_do_root_total_gib }} GiB total and
+      {{ kube_do_root_available_gib }} GiB available; Kubernetes control-plane
       storage and container images require at least 20 GiB total and 5 GiB
       available. Resize the virtual disk and guest filesystem before installing.
 
 - name: Warn about the recommended root filesystem capacity
   ansible.builtin.debug:
     msg: >-
-      WARNING: the root filesystem has {{ kube-do_root_total_gib }} GiB total;
+      WARNING: the root filesystem has {{ kube_do_root_total_gib }} GiB total;
       kube-do recommends provisioning at least a 50 GiB disk for control-plane
       nodes (about 49 GiB usable filesystem) because etcd, container images and
       logs share this filesystem.
-  when: kube-do_root_filesystem.size_total | int < kube-do_recommended_root_total_bytes
+  when: kube_do_root_filesystem.size_total | int < kube_do_recommended_root_total_bytes
 
 - name: Ensure kubelet can read a resolver configuration
   ansible.builtin.copy:
@@ -101,14 +101,14 @@
 - name: Inspect the Debian-family firewall command
   ansible.builtin.stat:
     path: /usr/sbin/ufw
-  register: kube-do_ufw
+  register: kube_do_ufw
   when: platform_os_family == 'debian'
 
 - name: Disable ufw
   ansible.builtin.command: ufw --force disable
   when:
     - platform_os_family == 'debian'
-    - kube-do_ufw.stat is defined and kube-do_ufw.stat.exists
+    - kube_do_ufw.stat is defined and kube_do_ufw.stat.exists
   changed_when: true
 
 - name: Stop and disable the ufw service
@@ -123,7 +123,7 @@
 - name: Inspect SELinux configuration
   ansible.builtin.stat:
     path: /etc/selinux/config
-  register: kube-do_selinux_config
+  register: kube_do_selinux_config
   when: platform_os_family == 'rhel'
 
 - name: Disable SELinux persistently
@@ -133,12 +133,12 @@
     line: 'SELINUX=disabled'
   when:
     - platform_os_family == 'rhel'
-    - kube-do_selinux_config.stat.exists
-  register: kube-do_selinux_changed
+    - kube_do_selinux_config.stat.exists
+  register: kube_do_selinux_changed
 
 - name: Read current SELinux mode
   ansible.builtin.command: getenforce
-  register: kube-do_selinux_mode
+  register: kube_do_selinux_mode
   changed_when: false
   failed_when: false
   when: platform_os_family == 'rhel'
@@ -147,7 +147,7 @@
   ansible.builtin.command: setenforce 0
   when:
     - platform_os_family == 'rhel'
-    - kube-do_selinux_mode.stdout == 'Enforcing'
+    - kube_do_selinux_mode.stdout == 'Enforcing'
   changed_when: true
   failed_when: false
 
@@ -158,6 +158,6 @@
       boot is fully compliant. kube-do never reboots nodes automatically.
   when:
     - platform_os_family == 'rhel'
-    - (kube-do_selinux_changed is defined and kube-do_selinux_changed is changed) or
-      (kube-do_selinux_mode.stdout | default('') in ['Enforcing', 'Permissive'])
+    - (kube_do_selinux_changed is defined and kube_do_selinux_changed is changed) or
+      (kube_do_selinux_mode.stdout | default('') in ['Enforcing', 'Permissive'])
 

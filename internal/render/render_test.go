@@ -123,8 +123,8 @@ spec:
 	}
 	for _, want := range []string{
 		"[installer]",
-		"cp-1 ansible_host=10.0.0.11 ansible_user=installer ansible_port=2222 kube-do_node_ip=10.0.0.11 ansible_ssh_private_key_file=/root/.ssh/kube-do",
-		"worker-1 ansible_host=10.0.0.21 ansible_user=installer ansible_port=2222 kube-do_node_ip=10.0.0.21 ansible_ssh_private_key_file=/root/.ssh/kube-do",
+		"cp-1 ansible_host=10.0.0.11 ansible_user=installer ansible_port=2222 kube_do_node_ip=10.0.0.11 ansible_ssh_private_key_file=/root/.ssh/kube-do",
+		"worker-1 ansible_host=10.0.0.21 ansible_user=installer ansible_port=2222 kube_do_node_ip=10.0.0.21 ansible_ssh_private_key_file=/root/.ssh/kube-do",
 		"[k8s_cluster:children]",
 	} {
 		if !strings.Contains(string(inventory), want) {
@@ -140,8 +140,8 @@ spec:
 	if err := yaml.Unmarshal(data, &vars); err != nil {
 		t.Fatalf("group vars are not valid YAML: %v", err)
 	}
-	if vars["kube-do_build"] != "test-build" {
-		t.Fatalf("kube-do_build = %v", vars["kube-do_build"])
+	if vars["kube_do_build"] != "test-build" {
+		t.Fatalf("kube_do_build = %v", vars["kube_do_build"])
 	}
 	if vars["control_plane_endpoint"] != "https://10.0.0.100:16443" {
 		t.Fatalf("endpoint = %v", vars["control_plane_endpoint"])
@@ -188,5 +188,73 @@ spec:
 	}
 	if vars["ssh_user"] != "installer" || vars["ssh_port"] != 2222 || vars["pod_cidr"] != "10.244.0.0/16" {
 		t.Fatalf("rendered defaults = %#v", vars)
+	}
+}
+
+func TestRenderFailureDoesNotReplaceExistingInventory(t *testing.T) {
+	cfg, err := cluster.Parse([]byte(`apiVersion: kube-do.io/v1alpha1
+kind: ClusterConfig
+metadata:
+  name: test
+build: test-build
+installer:
+  address: 10.0.0.10
+registry:
+  address: 10.0.0.10:5000
+controlPlane:
+  vip: 10.0.0.100
+  nodes:
+    - name: cp-1
+      address: 10.0.0.11
+cni:
+  name: cilium
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Parse([]byte(`apiVersion: kube-do.io/v1alpha1
+kind: ResourceManifest
+metadata:
+  name: test-build
+  kubernetesVersion: v1.36.5
+spec:
+  platform:
+    os: linux
+    arch: amd64
+  registry:
+    namespace: kube-do
+  installer:
+    binaries: []
+  binaries:
+    - name: kubeadm
+      version: v1.36.5
+      os: linux
+      arch: amd64
+      url: https://example.com/kubeadm
+      sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  images:
+    - name: pause
+      source: registry.k8s.io/pause:3.10.2
+      target: pause:3.10.2
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := t.TempDir()
+	inventoryPath := filepath.Join(out, "inventory.ini")
+	const previous = "# previous inventory\n"
+	if err := os.WriteFile(inventoryPath, []byte(previous), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Render(cfg, m, out); err == nil || !strings.Contains(err.Error(), "no installer binaries") {
+		t.Fatalf("Render error = %v", err)
+	}
+	data, err := os.ReadFile(inventoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != previous {
+		t.Fatalf("inventory was replaced after a failed render: %q", data)
 	}
 }

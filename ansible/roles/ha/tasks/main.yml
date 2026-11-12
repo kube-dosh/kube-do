@@ -12,33 +12,33 @@
 
 - name: Resolve HA Artifacts
   ansible.builtin.set_fact:
-    kube-do_haproxy_image: "{{ installer_images | selectattr('name', 'equalto', 'haproxy') | first }}"
-    kube-do_keepalived_image: "{{ installer_images | selectattr('name', 'equalto', 'keepalived') | first }}"
+    kube_do_haproxy_image: "{{ installer_images | selectattr('name', 'equalto', 'haproxy') | first }}"
+    kube_do_keepalived_image: "{{ installer_images | selectattr('name', 'equalto', 'keepalived') | first }}"
 
 - name: Assert that ctr is available for the HA containers
   ansible.builtin.command: /usr/local/bin/ctr --version
   changed_when: false
 
 - name: Determine the interface that owns the node address
-  ansible.builtin.command: "ip -o -4 addr show to {{ kube-do_node_ip }}"
-  register: kube-do_node_interface_addr
+  ansible.builtin.command: "ip -o -4 addr show to {{ kube_do_node_ip }}"
+  register: kube_do_node_interface_addr
   changed_when: false
 
 - name: Assert that the node address maps to exactly one non-loopback interface
   ansible.builtin.assert:
     that:
-      - kube-do_node_interface_addr.stdout_lines | length == 1
-      - kube-do_node_interface_addr.stdout is search('\\binet\\s+' ~ (kube-do_node_ip | regex_escape) ~ '/')
-      - (kube-do_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first) != 'lo'
+      - kube_do_node_interface_addr.stdout_lines | length == 1
+      - kube_do_node_interface_addr.stdout is search('\\binet\\s+' ~ (kube_do_node_ip | regex_escape) ~ '/')
+      - (kube_do_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first) != 'lo'
     fail_msg: >-
-      The node address {{ kube-do_node_ip }} must be assigned exactly once to a
-      non-loopback interface; found: {{ kube-do_node_interface_addr.stdout | default('nothing') }}
+      The node address {{ kube_do_node_ip }} must be assigned exactly once to a
+      non-loopback interface; found: {{ kube_do_node_interface_addr.stdout | default('nothing') }}
 
 - name: Record VIP networking facts
   ansible.builtin.set_fact:
-    kube-do_vip_interface: "{{ kube-do_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first }}"
-    kube-do_vip_prefix: "{{ kube-do_node_interface_addr.stdout | regex_search('inet\\s+[0-9.]+/(\\d+)', '\\1') | first }}"
-    kube-do_vrrp_priority: "{{ 200 - (groups['control_plane'].index(inventory_hostname) | int) }}"
+    kube_do_vip_interface: "{{ kube_do_node_interface_addr.stdout | regex_search('^\\d+:\\s+(\\S+)', '\\1') | first }}"
+    kube_do_vip_prefix: "{{ kube_do_node_interface_addr.stdout | regex_search('inet\\s+[0-9.]+/(\\d+)', '\\1') | first }}"
+    kube_do_vrrp_priority: "{{ 200 - (groups['control_plane'].index(inventory_hostname) | int) }}"
 
 - name: Create HA configuration directories
   ansible.builtin.file:
@@ -86,7 +86,7 @@
       - pull
       - --hosts-dir
       - /etc/containerd/certs.d
-      - "{{ kube-do_haproxy_image.target }}"
+      - "{{ kube_do_haproxy_image.target }}"
   changed_when: false
 
 - name: Validate the HAProxy configuration in its container
@@ -100,7 +100,7 @@
       - --net-host
       - --mount
       - type=bind,src=/etc/haproxy,dst=/etc/haproxy,options=rbind:ro
-      - "{{ kube-do_haproxy_image.target }}"
+      - "{{ kube_do_haproxy_image.target }}"
       - haproxy-validate
       - /usr/local/sbin/haproxy
       - -c
@@ -148,9 +148,9 @@
 
 - name: Wait for the HAProxy container task
   ansible.builtin.command: /usr/local/bin/ctr --namespace kube-do tasks ps haproxy
-  register: kube-do_haproxy_task
+  register: kube_do_haproxy_task
   changed_when: false
-  until: kube-do_haproxy_task.rc == 0
+  until: kube_do_haproxy_task.rc == 0
   retries: 20
   delay: 2
 
@@ -189,17 +189,17 @@
 
 - name: Wait for the keepalived container task
   ansible.builtin.command: /usr/local/bin/ctr --namespace kube-do tasks ps keepalived
-  register: kube-do_keepalived_task
+  register: kube_do_keepalived_task
   changed_when: false
-  until: kube-do_keepalived_task.rc == 0
+  until: kube_do_keepalived_task.rc == 0
   retries: 20
   delay: 2
 
 - name: Wait for the VIP to appear on the elected node
-  ansible.builtin.command: "ip -o -4 addr show dev {{ kube-do_vip_interface }}"
-  register: kube-do_vip_state
+  ansible.builtin.command: "ip -o -4 addr show dev {{ kube_do_vip_interface }}"
+  register: kube_do_vip_state
   changed_when: false
-  until: control_plane_vip in kube-do_vip_state.stdout
+  until: control_plane_vip in kube_do_vip_state.stdout
   retries: 20
   delay: 2
   when: inventory_hostname == groups['control_plane'][0]

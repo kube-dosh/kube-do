@@ -332,9 +332,10 @@ cni:
 - 节点地址与 VIP 必须是 IPv4，名称和地址不能重复。
 - `installer.address` 只能填写主机名或 IP，不带 scheme 和端口；`registry.address` 必须是 `host:port`。
 - `registry.dataDir` 与 `provided` 模式下的 TLS 文件路径必须是绝对路径。
-- Pod 与 Service 网段必须是合法且不重叠的 IPv4 网络。
+- Pod 与 Service 网段必须是合法且不重叠的 IPv4 网络，并且不能包含任何节点地址或控制平面 VIP。
 - `build` 必须是安全的单段路径名称。
 - 所选平台必须存在于 Resource Manifest 中。
+- `cluster.yaml` 与每份 Resource Manifest 都必须只包含一个 YAML 文档。
 
 ### Registry TLS
 
@@ -350,7 +351,7 @@ Registry 不提供认证或 RBAC。任何能访问 `5000` 端口的主体都可�
 | 命令 | 作用 |
 | --- | --- |
 | `kube-do version` | 输出版本、Commit 与构建时间 |
-| `kube-do check` | 校验 `cluster.yaml`、Resource Manifest 与缓存资源，可选探测 Registry |
+| `kube-do check` | 校验 `cluster.yaml`、Resource Manifest、输入文件、缓存资源与构建元数据，可选探测 Registry |
 | `kube-do download` | 下载二进制、构建 HA 镜像并搬运节点镜像 |
 | `kube-do registry` | 部署或复用私有 Registry |
 | `kube-do serve` | 通过 HTTP 提供缓存资源 |
@@ -418,11 +419,11 @@ CGO_ENABLED=0 go build -trimpath -o kube-do ./cmd/kube-do
 <cache-dir>/artifacts/<build>/<os>-<arch>/.<name>.build.json
 ```
 
-普通二进制按 Manifest 中的 SHA-256 校验。构建型产物只有在校验文件、sidecar 与 build marker 一致时才会复用。
+普通二进制按 Manifest 中的 SHA-256 校验。构建型产物只有在校验文件、sidecar 与 build marker 一致时才会复用；若 sidecar 或 marker 格式错误、内容不一致，`check` 会失败。
 
 ### CLI 发布产物
 
-发布 GitHub Release 时，[Release 工作流](.github/workflows/release.yml)会自动运行测试，并为 `amd64` 与 `arm64` 构建静态 Linux 二进制，通过链接参数注入版本、Commit 与构建时间。
+发布 GitHub Release 时，[Release 工作流](.github/workflows/release.yml)会检查格式、运行 `go vet` 与启用了竞态检测的测试，并为 `amd64` 与 `arm64` 构建静态 Linux 二进制，通过链接参数注入版本、Commit 与构建时间。
 
 发布资产命名如下：
 

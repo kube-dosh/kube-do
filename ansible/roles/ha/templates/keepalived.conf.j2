@@ -11,22 +11,22 @@ vrrp_track_process chk_haproxy {
 
 vrrp_instance KUBE_DO_API {
   state BACKUP
-  interface {{ kube-do_vip_interface }}
+  interface {{ kube_do_vip_interface }}
   virtual_router_id {{ control_plane_vrrp_router_id }}
-  priority {{ kube-do_vrrp_priority }}
+  priority {{ kube_do_vrrp_priority }}
   advert_int 1
   authentication {
     auth_type PASS
     auth_pass {{ control_plane_vrrp_password }}
   }
-  unicast_src_ip {{ kube-do_node_ip }}
+  unicast_src_ip {{ kube_do_node_ip }}
   unicast_peer {
 {% for node in control_plane_nodes if node.name != inventory_hostname %}
     {{ node.address }}
 {% endfor %}
   }
   virtual_ipaddress {
-    {{ control_plane_vip }}/{{ kube-do_vip_prefix }} dev {{ kube-do_vip_interface }}
+    {{ control_plane_vip }}/{{ kube_do_vip_prefix }} dev {{ kube_do_vip_interface }}
   }
   track_process {
     chk_haproxy

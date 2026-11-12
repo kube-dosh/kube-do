@@ -26,8 +26,20 @@ func ExtractTarGz(src, destDir string) ([]string, error) {
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
+	root, err := filepath.Abs(destDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, err
+	}
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, err
+	}
 
 	var written []string
+	seen := map[string]bool{}
 	type directoryTime struct {
 		path string
 		mod  time.Time
@@ -45,14 +57,23 @@ func ExtractTarGz(src, destDir string) ([]string, error) {
 		if name == "." {
 			continue
 		}
-		dest, err := secureJoin(destDir, name)
+		dest, err := secureJoin(root, name)
 		if err != nil {
 			return nil, fmt.Errorf("unsafe archive path %q", hdr.Name)
+		}
+		if hdr.Typeflag != tar.TypeDir {
+			if seen[dest] {
+				return nil, fmt.Errorf("duplicate archive path %q", hdr.Name)
+			}
+			seen[dest] = true
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(dest, 0o755); err != nil {
 				return nil, err
+			}
+			if err := ensureWithinRoot(rootReal, dest); err != nil {
+				return nil, fmt.Errorf("unsafe archive directory %q: %w", hdr.Name, err)
 			}
 			if !hdr.ModTime.IsZero() {
 				directories = append(directories, directoryTime{path: dest, mod: hdr.ModTime})
@@ -60,6 +81,12 @@ func ExtractTarGz(src, destDir string) ([]string, error) {
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 				return nil, err
+			}
+			if err := ensureWithinRoot(rootReal, filepath.Dir(dest)); err != nil {
+				return nil, fmt.Errorf("unsafe archive path %q: %w", hdr.Name, err)
+			}
+			if info, err := os.Lstat(dest); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("refusing to overwrite symlink %q", hdr.Name)
 			}
 			out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777)
 			if err != nil {
@@ -82,22 +109,44 @@ func ExtractTarGz(src, destDir string) ([]string, error) {
 			if filepath.IsAbs(hdr.Linkname) {
 				return nil, fmt.Errorf("unsafe archive symlink %q -> %q", hdr.Name, hdr.Linkname)
 			}
-			if _, err := secureJoin(destDir, filepath.Join(filepath.Dir(name), hdr.Linkname)); err != nil {
+			target, err := secureJoin(root, filepath.Join(filepath.Dir(name), hdr.Linkname))
+			if err != nil {
 				return nil, fmt.Errorf("unsafe archive symlink %q -> %q", hdr.Name, hdr.Linkname)
 			}
 			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 				return nil, err
 			}
+			if err := ensureWithinRoot(rootReal, filepath.Dir(dest)); err != nil {
+				return nil, fmt.Errorf("unsafe archive symlink %q: %w", hdr.Name, err)
+			}
+			if _, err := os.Lstat(target); err == nil {
+				if err := ensureWithinRoot(rootReal, target); err != nil {
+					return nil, fmt.Errorf("unsafe archive symlink %q -> %q: %w", hdr.Name, hdr.Linkname, err)
+				}
+			}
 			if err := os.Symlink(hdr.Linkname, dest); err != nil {
 				return nil, err
 			}
 		case tar.TypeLink:
-			target, err := secureJoin(destDir, hdr.Linkname)
+			target, err := secureJoin(root, hdr.Linkname)
 			if err != nil {
 				return nil, fmt.Errorf("unsafe archive hardlink %q -> %q", hdr.Name, hdr.Linkname)
 			}
 			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 				return nil, err
+			}
+			if err := ensureWithinRoot(rootReal, filepath.Dir(dest)); err != nil {
+				return nil, fmt.Errorf("unsafe archive hardlink %q: %w", hdr.Name, err)
+			}
+			info, err := os.Lstat(target)
+			if err != nil {
+				return nil, fmt.Errorf("hardlink target %q: %w", hdr.Linkname, err)
+			}
+			if !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("hardlink target %q is not a regular file", hdr.Linkname)
+			}
+			if err := ensureWithinRoot(rootReal, target); err != nil {
+				return nil, fmt.Errorf("unsafe archive hardlink %q -> %q: %w", hdr.Name, hdr.Linkname, err)
 			}
 			if err := os.Link(target, dest); err != nil {
 				return nil, err
@@ -122,4 +171,16 @@ func secureJoin(root, name string) (string, error) {
 		return "", fmt.Errorf("path escapes root")
 	}
 	return dest, nil
+}
+
+func ensureWithinRoot(rootReal, path string) error {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(rootReal, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path resolves outside extraction root")
+	}
+	return nil
 }

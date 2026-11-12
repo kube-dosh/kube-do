@@ -3,7 +3,7 @@ set -eu
 
 namespace=kube-do
 container=keepalived
-image={{ kube-do_keepalived_image.target | quote }}
+image={{ kube_do_keepalived_image.target | quote }}
 
 mkdir -p /run/keepalived /var/log/kube-do
 

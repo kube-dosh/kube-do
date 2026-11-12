@@ -200,6 +200,13 @@ func Parse(data []byte) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("decode resource manifest: %w", err)
 	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, fmt.Errorf("decode trailing resource manifest document: %w", err)
+		}
+		return nil, errors.New("resource manifest must contain exactly one YAML document")
+	}
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}

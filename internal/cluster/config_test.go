@@ -101,6 +101,38 @@ func TestValidateRejectsDuplicateAddress(t *testing.T) {
 	}
 }
 
+func TestParseRejectsMultipleYAMLDocuments(t *testing.T) {
+	_, err := Parse([]byte(validConfigYAML() + "---\nmetadata:\n  name: smuggled\n"))
+	if err == nil || !strings.Contains(err.Error(), "exactly one YAML document") {
+		t.Fatalf("expected multiple document error, got %v", err)
+	}
+}
+
+func TestValidateRejectsNodeAddressesInsideClusterCIDRs(t *testing.T) {
+	for _, tc := range []struct {
+		from string
+		to   string
+		want string
+	}{
+		{"cni:\n  name: cilium", "cni:\n  name: cilium\n  podCIDR: 10.0.0.0/8", "cni.podCIDR"},
+		{"cni:\n  name: cilium", "cni:\n  name: cilium\n  serviceCIDR: 10.0.0.0/8", "cni.serviceCIDR"},
+	} {
+		bad := strings.Replace(validConfigYAML(), tc.from, tc.to, 1)
+		_, err := Parse([]byte(bad))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("expected %s collision error, got %v", tc.want, err)
+		}
+	}
+}
+
+func TestValidateRejectsVIPInsideClusterCIDRs(t *testing.T) {
+	bad := strings.Replace(validConfigYAML(), "cni:\n  name: cilium", "cni:\n  name: cilium\n  podCIDR: 10.0.0.0/8", 1)
+	_, err := Parse([]byte(bad))
+	if err == nil || !strings.Contains(err.Error(), "controlPlane.vip") {
+		t.Fatalf("expected VIP collision error, got %v", err)
+	}
+}
+
 func TestValidateRejectsBadRegistryAddress(t *testing.T) {
 	bad := strings.Replace(validConfigYAML(), "address: 10.0.0.10:5000", "address: 10.0.0.10", 1)
 	_, err := Parse([]byte(bad))

@@ -68,19 +68,19 @@
       - --ignore-not-found
       - -o
       - name
-  register: kube-do_kube_proxy
+  register: kube_do_kube_proxy
   changed_when: false
   failed_when: false
 
 - name: Assert the cluster uses kube-proxy replacement
   ansible.builtin.assert:
     that:
-      - kube-do_kube_proxy.rc == 0
-      - kube-do_kube_proxy.stdout | trim == ''
+      - kube_do_kube_proxy.rc == 0
+      - kube_do_kube_proxy.stdout | trim == ''
     fail_msg: >-
       kube-proxy lookup failed or kube-proxy exists even though this Build uses
-      Cilium kube-proxy replacement (rc={{ kube-do_kube_proxy.rc }}, stdout={{
-      kube-do_kube_proxy.stdout | trim }})
+      Cilium kube-proxy replacement (rc={{ kube_do_kube_proxy.rc }}, stdout={{
+      kube_do_kube_proxy.stdout | trim }})
 
 - name: Show cluster status
   ansible.builtin.command:
@@ -92,10 +92,10 @@
       - nodes
       - -o
       - wide
-  register: kube-do_cluster_status
+  register: kube_do_cluster_status
   changed_when: false
 
 - name: Print cluster status
   ansible.builtin.debug:
-    var: kube-do_cluster_status.stdout_lines
+    var: kube_do_cluster_status.stdout_lines
 

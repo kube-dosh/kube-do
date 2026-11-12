@@ -332,9 +332,10 @@ cni:
 - Node and VIP addresses must be IPv4; names and addresses must be unique.
 - `installer.address` must be a host or IP without a scheme or port; `registry.address` must be `host:port`.
 - `registry.dataDir` and provided TLS file paths must be absolute.
-- Pod and Service CIDRs must be valid, non-overlapping IPv4 networks.
+- Pod and Service CIDRs must be valid, non-overlapping IPv4 networks that do not contain any node address or the control-plane VIP.
 - `build` must be a safe single path segment.
 - The selected platform must exist in the Resource Manifest.
+- `cluster.yaml` and each Resource Manifest must contain exactly one YAML document.
 
 ### Registry TLS
 
@@ -350,7 +351,7 @@ The registry does not implement authentication or RBAC. Anyone who can reach por
 | Command | Purpose |
 | --- | --- |
 | `kube-do version` | Print version, commit, and build time |
-| `kube-do check` | Validate `cluster.yaml`, the Resource Manifest, and cached artifacts; optionally probe the registry |
+| `kube-do check` | Validate `cluster.yaml`, the Resource Manifest, input files, cached artifacts and build metadata; optionally probe the registry |
 | `kube-do download` | Download binaries, build HA images, and mirror node images |
 | `kube-do registry` | Deploy or reuse the private registry |
 | `kube-do serve` | Serve cached artifacts over HTTP |
@@ -418,11 +419,11 @@ The cache can be selected with `--cache-dir`, `KUBE_DO_CACHE_DIR`, `$XDG_CACHE_H
 <cache-dir>/artifacts/<build>/<os>-<arch>/.<name>.build.json
 ```
 
-Regular binaries are verified against the manifest SHA-256. Build products are reused only when the binary, checksum sidecar, and build marker agree.
+Regular binaries are verified against the manifest SHA-256. Build products are reused only when the binary, checksum sidecar, and build marker agree; `check` fails when the sidecar or marker is malformed or inconsistent.
 
 ### CLI release assets
 
-The [Release workflow](.github/workflows/release.yml) runs when a GitHub Release is published. It executes the test suite and builds static Linux binaries for `amd64` and `arm64` with version, commit, and build time injected through linker flags.
+The [Release workflow](.github/workflows/release.yml) runs when a GitHub Release is published. It checks formatting, runs `go vet`, executes the race-enabled test suite, and builds static Linux binaries for `amd64` and `arm64` with version, commit, and build time injected through linker flags.
 
 Assets are named as follows:
 

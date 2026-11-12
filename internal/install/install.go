@@ -69,6 +69,17 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	inventory := opts.Inventory
+	if !filepath.IsAbs(inventory) && opts.WorkingDir != "" {
+		inventory = filepath.Join(opts.WorkingDir, inventory)
+	}
+	info, err := os.Stat(inventory)
+	if err != nil {
+		return fmt.Errorf("inventory %s: %w", inventory, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("inventory %s is a directory", inventory)
+	}
 	lookPath := opts.LookPath
 	if lookPath == nil {
 		lookPath = exec.LookPath
