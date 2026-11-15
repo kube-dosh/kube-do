@@ -24,6 +24,7 @@ type fakeExecutor struct {
 	added        []cluster.Node
 	backedUp     bool
 	checkedCerts bool
+	certBlock    chan struct{}
 }
 
 func (f *fakeExecutor) Install(_ context.Context, cfg *cluster.Config, _ InstallRequest, _ string, log io.Writer) error {
@@ -42,26 +43,35 @@ func (f *fakeExecutor) AddWorkers(_ context.Context, _ *cluster.Config, newWorke
 	return nil
 }
 
-func (f *fakeExecutor) BackupEtcd(_ context.Context, cfg *cluster.Config, _, backupDir string, log io.Writer) (ops.BackupResult, error) {
+func (f *fakeExecutor) BackupEtcd(_ context.Context, cfg *cluster.Config, _, backupDir string, _ ops.BackupOptions, log io.Writer) (ops.BackupResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.backedUp = true
 	result := ops.BackupResult{
-		Cluster: cfg.Metadata.Name,
-		Path:    backupDir + "/snapshot.db",
-		SHA256:  strings.Repeat("a", 64),
-		Size:    1024,
+		Cluster:   cfg.Metadata.Name,
+		Path:      backupDir + "/snapshot.db",
+		SHA256:    strings.Repeat("a", 64),
+		Size:      1024,
+		Validated: true,
 	}
 	fmt.Fprintln(log, "etcd backup complete")
 	return result, nil
 }
 
-func (f *fakeExecutor) CheckCerts(_ context.Context, _ *cluster.Config, _ string, log io.Writer) error {
+func (f *fakeExecutor) CheckCerts(ctx context.Context, cfg *cluster.Config, _ string, _ ops.CertCheckOptions, log io.Writer) (ops.CertCheckResult, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.checkedCerts = true
+	block := f.certBlock
+	f.mu.Unlock()
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return ops.CertCheckResult{}, ctx.Err()
+		}
+	}
 	fmt.Fprintln(log, "certificate check complete")
-	return nil
+	return ops.CertCheckResult{Cluster: cfg.Metadata.Name, Healthy: true, CertificateCount: 1}, nil
 }
 
 const testClusterYAML = `apiVersion: kube-do.io/v1alpha1
@@ -137,12 +147,27 @@ func waitJob(t *testing.T, baseURL, id string) Job {
 		resp := request(t, http.MethodGet, baseURL+"/api/v1/jobs/"+id, "", nil)
 		job := decode[Job](t, resp)
 		switch job.Status {
-		case JobSucceeded, JobFailed:
+		case JobSucceeded, JobFailed, JobCancelled, JobInterrupted:
 			return job
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("job %s did not finish", id)
+	return Job{}
+}
+
+func waitJobStatus(t *testing.T, baseURL, id string, want JobStatus) Job {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		resp := request(t, http.MethodGet, baseURL+"/api/v1/jobs/"+id, "", nil)
+		job := decode[Job](t, resp)
+		if job.Status == want {
+			return job
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not reach status %s", id, want)
 	return Job{}
 }
 
@@ -235,11 +260,40 @@ func TestClusterLifecycleAPI(t *testing.T) {
 	if certJob.Status != JobSucceeded {
 		t.Fatalf("certs check job = %#v", certJob)
 	}
+	if result, ok := certJob.Result.(map[string]any); !ok || result["healthy"] != true {
+		t.Fatalf("certs check result = %#v", certJob.Result)
+	}
 	executor.mu.Lock()
 	backedUp, checkedCerts := executor.backedUp, executor.checkedCerts
 	executor.mu.Unlock()
 	if !backedUp || !checkedCerts {
 		t.Fatalf("executor calls: backup=%v certs=%v", backedUp, checkedCerts)
+	}
+}
+
+func TestCancelRunningJobAPI(t *testing.T) {
+	_, executor, httpServer := newTestServer(t, "")
+	executor.certBlock = make(chan struct{})
+	defer close(executor.certBlock)
+	base := httpServer.URL
+
+	resp := request(t, http.MethodPost, base+"/api/v1/clusters", "", []byte(testClusterYAML))
+	resp.Body.Close()
+	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/certs/check", "", nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("certs check status = %d", resp.StatusCode)
+	}
+	job := decode[Job](t, resp)
+	waitJobStatus(t, base, job.ID, JobRunning)
+
+	resp = request(t, http.MethodPost, base+"/api/v1/jobs/"+job.ID+"/cancel", "", nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("cancel status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	job = waitJob(t, base, job.ID)
+	if job.Status != JobCancelled {
+		t.Fatalf("cancelled job = %#v", job)
 	}
 }
 

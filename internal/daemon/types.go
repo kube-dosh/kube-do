@@ -56,25 +56,28 @@ type AddNodesRequest struct {
 type JobStatus string
 
 const (
-	JobQueued    JobStatus = "queued"
-	JobRunning   JobStatus = "running"
-	JobSucceeded JobStatus = "succeeded"
-	JobFailed    JobStatus = "failed"
+	JobQueued      JobStatus = "queued"
+	JobRunning     JobStatus = "running"
+	JobSucceeded   JobStatus = "succeeded"
+	JobFailed      JobStatus = "failed"
+	JobCancelled   JobStatus = "cancelled"
+	JobInterrupted JobStatus = "interrupted"
 )
 
 // Job describes an asynchronous cluster operation.
 type Job struct {
-	ID         string     `json:"id"`
-	Kind       string     `json:"kind"`
-	Cluster    string     `json:"cluster"`
-	Status     JobStatus  `json:"status"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	StartedAt  *time.Time `json:"startedAt,omitempty"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	NewWorkers []Node     `json:"newWorkers,omitempty"`
-	LogBytes   int        `json:"logBytes"`
-	Result     any        `json:"result,omitempty"`
+	ID           string     `json:"id"`
+	Kind         string     `json:"kind"`
+	Cluster      string     `json:"cluster"`
+	Status       JobStatus  `json:"status"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	StartedAt    *time.Time `json:"startedAt,omitempty"`
+	FinishedAt   *time.Time `json:"finishedAt,omitempty"`
+	Error        string     `json:"error,omitempty"`
+	NewWorkers   []Node     `json:"newWorkers,omitempty"`
+	LogBytes     int        `json:"logBytes"`
+	LogTruncated bool       `json:"logTruncated,omitempty"`
+	Result       any        `json:"result,omitempty"`
 }
 
 func toNode(n cluster.Node) Node {

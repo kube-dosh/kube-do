@@ -25,8 +25,8 @@ import (
 type Executor interface {
 	Install(ctx context.Context, cfg *cluster.Config, req InstallRequest, workDir string, log io.Writer) error
 	AddWorkers(ctx context.Context, cfg *cluster.Config, newWorkers []cluster.Node, workDir string, log io.Writer) error
-	BackupEtcd(ctx context.Context, cfg *cluster.Config, workDir, backupDir string, log io.Writer) (ops.BackupResult, error)
-	CheckCerts(ctx context.Context, cfg *cluster.Config, workDir string, log io.Writer) error
+	BackupEtcd(ctx context.Context, cfg *cluster.Config, workDir, backupDir string, opts ops.BackupOptions, log io.Writer) (ops.BackupResult, error)
+	CheckCerts(ctx context.Context, cfg *cluster.Config, workDir string, opts ops.CertCheckOptions, log io.Writer) (ops.CertCheckResult, error)
 }
 
 // HostExecutor runs the existing kube-do resource and Ansible pipeline.
@@ -173,20 +173,20 @@ func (e *HostExecutor) AddWorkers(ctx context.Context, cfg *cluster.Config, newW
 	})
 }
 
-func (e *HostExecutor) BackupEtcd(ctx context.Context, cfg *cluster.Config, workDir, backupDir string, log io.Writer) (ops.BackupResult, error) {
+func (e *HostExecutor) BackupEtcd(ctx context.Context, cfg *cluster.Config, workDir, backupDir string, opts ops.BackupOptions, log io.Writer) (ops.BackupResult, error) {
 	m, err := e.manifestFor(cfg)
 	if err != nil {
 		return ops.BackupResult{}, err
 	}
-	return ops.BackupEtcd(ctx, cfg, m, e.AnsibleDir, workDir, backupDir, log)
+	return ops.BackupEtcd(ctx, cfg, m, e.AnsibleDir, workDir, backupDir, opts, log)
 }
 
-func (e *HostExecutor) CheckCerts(ctx context.Context, cfg *cluster.Config, workDir string, log io.Writer) error {
+func (e *HostExecutor) CheckCerts(ctx context.Context, cfg *cluster.Config, workDir string, opts ops.CertCheckOptions, log io.Writer) (ops.CertCheckResult, error) {
 	m, err := e.manifestFor(cfg)
 	if err != nil {
-		return err
+		return ops.CertCheckResult{}, err
 	}
-	return ops.CheckCerts(ctx, cfg, m, e.AnsibleDir, workDir, log)
+	return ops.CheckCerts(ctx, cfg, m, e.AnsibleDir, workDir, opts, log)
 }
 
 func (e *HostExecutor) manifestFor(cfg *cluster.Config) (*manifest.Manifest, error) {

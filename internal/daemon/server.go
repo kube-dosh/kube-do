@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/kube-dosh/kube-do/internal/cluster"
+	"github.com/kube-dosh/kube-do/internal/ops"
 	"github.com/kube-dosh/kube-do/internal/serve"
 )
 
@@ -32,9 +33,13 @@ type Options struct {
 	Token        string
 	// ArtifactAddr optionally starts a second HTTP server that serves the
 	// Artifact cache at the same /artifacts/ URL used by cluster nodes.
-	ArtifactAddr string
-	Logger       *log.Logger
-	Executor     Executor
+	ArtifactAddr   string
+	Logger         *log.Logger
+	Executor       Executor
+	JobTimeout     time.Duration
+	MaxJobLogBytes int
+	BackupOptions  ops.BackupOptions
+	CertOptions    ops.CertCheckOptions
 }
 
 type Server struct {
@@ -85,7 +90,15 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{opts: opts, store: store, jobs: NewJobManager()}, nil
+	jobs, err := NewJobManager(JobManagerOptions{
+		StateDir:    filepath.Join(opts.DataDir, "jobs"),
+		Timeout:     opts.JobTimeout,
+		MaxLogBytes: opts.MaxJobLogBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &Server{opts: opts, store: store, jobs: jobs}, nil
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -135,6 +148,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/logs", s.handleGetJobLogs)
+	mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.handleCancelJob)
 	if s.opts.CacheDir != "" {
 		mux.Handle("GET /artifacts/", http.FileServer(http.Dir(s.opts.CacheDir)))
 	}
@@ -337,7 +351,7 @@ func (s *Server) handleEtcdBackup(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		result, err := s.opts.Executor.BackupEtcd(ctx, cfg, workDir, backupDir, log)
+		result, err := s.opts.Executor.BackupEtcd(ctx, cfg, workDir, backupDir, s.opts.BackupOptions, log)
 		if err != nil {
 			return err
 		}
@@ -371,7 +385,12 @@ func (s *Server) handleCheckCerts(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return s.opts.Executor.CheckCerts(ctx, cfg, workDir, log)
+		result, err := s.opts.Executor.CheckCerts(ctx, cfg, workDir, s.opts.CertOptions, log)
+		if err != nil {
+			return err
+		}
+		s.jobs.SetResult(id, result)
+		return nil
 	})
 	if errors.Is(err, ErrClusterBusy) {
 		writeError(w, http.StatusConflict, err.Error())
@@ -407,6 +426,20 @@ func (s *Server) handleGetJobLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.WriteString(w, logs)
+}
+
+func (s *Server) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	job, err := s.jobs.Cancel(r.PathValue("id"))
+	switch {
+	case errors.Is(err, ErrJobNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrJobFinished):
+		writeError(w, http.StatusConflict, err.Error())
+	case err != nil:
+		writeError(w, http.StatusConflict, err.Error())
+	default:
+		writeJSON(w, http.StatusAccepted, job)
+	}
 }
 
 func clusterSummary(cfg *cluster.Config) ClusterSummary {

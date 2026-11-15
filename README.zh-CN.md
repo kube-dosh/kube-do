@@ -358,7 +358,7 @@ Registry 不提供认证或 RBAC。任何能访问 `5000` 端口的主体都可�
 | `kube-do serve` | 通过 HTTP 提供缓存资源 |
 | `kube-do render` | 生成 Ansible Inventory 与 Group Variables |
 | `kube-do install` | 执行 Ansible 安装 |
-| `kube-do daemon` | 启动集群管理 HTTP API，支持异步安装、Worker 增量纳管与任务/日志查询 |
+| `kube-do daemon` | 启动集群管理 HTTP API，支持异步安装、Worker 增量纳管、备份、证书检查、任务取消与持久化任务历史 |
 | `kube-do etcd backup` | 从第一个控制平面节点保存 etcd 快照并拉取到安装机 |
 | `kube-do certs check` | 检查所有控制平面节点的 Kubernetes 证书有效期 |
 | `kube-do manifest bump` | 按显式组件版本生成新的 Resource Manifest |
@@ -454,6 +454,7 @@ sha256sum -c checksums.txt
 - 容器化 HAProxy 与 keepalived，包括 VIP 故障切换与节点重启恢复。
 - Cilium kube-proxy replacement、CoreDNS 与 Hubble Relay 就绪。
 - Fedora 44 `amd64` 三控制平面 + 五 Worker 实验环境安装。
+- Fedora 实验环境的 daemon API 正常路径 E2E：鉴权、集群注册、重复注册与不支持请求、同集群任务冲突、带 `etcdutl` 校验和 SHA-256 核对的 etcd 备份、结构化证书检查、任务取消语义，以及 daemon 重启后的任务历史恢复。
 
 尚未验证：
 
@@ -461,8 +462,9 @@ sha256sum -c checksums.txt
 - Debian 13、Ubuntu 22.04/24.04 与所有 `arm64` 目标的端到端安装。
 - 任意安装机与目标机 glibc ABI 组合。
 - 长期稳定性、突然断电恢复，以及所有安装中断场景的自动续跑。
+- etcd 恢复演练、证书轮换、升级、回滚、控制平面扩容、节点移除、网络分区，以及多发行版/多架构 API E2E。
 
-自动化测试覆盖配置解析、Manifest 校验、归档解压安全、下载、Registry 操作、渲染与安装命令构造。
+自动化测试覆盖配置解析、Manifest 校验、归档解压安全、下载、Registry 操作、渲染、安装命令构造、任务生命周期与持久化、证书输出解析和备份元数据校验。真实 API 验证脚本见 [docs/e2e.md](docs/e2e.md)。
 
 ## 安全与运维边界
 
@@ -483,6 +485,8 @@ kube-do 面向受控的隔离环境。使用前请确认以下运维特征：
 - 不支持 Kubernetes 原地升级或 Build 回滚。
 - 不支持控制平面扩容、节点移除或集群卸载。
 - 支持 etcd 备份和证书检查，但尚不自动执行 etcd 恢复或证书轮换。
+- daemon 重启后不会继续执行任务；运行中的任务会标记为中断。
+- 由 `kubeadm join --control-plane` 加入的控制平面节点可能缺少部分证书，当前只报告缺失，不自动判定为异常。
 - Registry 不支持认证、RBAC、Web UI 或复制。
 - 不支持 HAProxy 与 keepalived 镜像的跨架构构建。
 - 不支持非 Linux 目标节点。
@@ -499,6 +503,12 @@ gofmt -l ./cmd ./internal ./manifests
 go vet ./...
 go test ./...
 go test -race ./...
+```
+
+针对已有集群运行真实 daemon API E2E：
+
+```bash
+KUBE_DO_E2E_CONFIG=/path/to/cluster.yaml hack/e2e-daemon.sh
 ```
 
 生成 Ansible Inventory 并执行语法检查：
@@ -530,6 +540,7 @@ kube-do/
 ## 文档
 
 - [术语表](GLOSSARY.md)
+- [daemon API E2E](docs/e2e.md)
 - [架构决策记录](docs/adr)
 - [集群配置示例](examples/cluster.yaml)
 - [发布工作流](.github/workflows/release.yml)

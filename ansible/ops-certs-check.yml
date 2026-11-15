@@ -4,10 +4,25 @@
   gather_facts: false
   any_errors_fatal: true
   tasks:
+    - name: Ensure the certificate output directory exists
+      ansible.builtin.file:
+        path: "{{ kube_do_cert_output_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      run_once: true
+
     - name: Run kubeadm certificate expiration check
       ansible.builtin.command: /usr/local/bin/kubeadm certs check-expiration
       register: kube_do_cert_expiration
       changed_when: false
+
+    - name: Save certificate output for structured parsing
+      ansible.builtin.copy:
+        dest: "{{ kube_do_cert_output_dir }}/{{ inventory_hostname }}.txt"
+        mode: '0600'
+        content: "{{ kube_do_cert_expiration.stdout }}\n"
+      delegate_to: localhost
 
     - name: Show certificate expiration
       ansible.builtin.debug:

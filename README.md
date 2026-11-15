@@ -357,7 +357,7 @@ The registry does not implement authentication or RBAC. Anyone who can reach por
 | `kube-do serve` | Serve cached artifacts over HTTP |
 | `kube-do render` | Generate the Ansible inventory and group variables |
 | `kube-do install` | Run the Ansible installation |
-| `kube-do daemon` | Run the cluster management HTTP API with asynchronous install, worker addition, and job/log queries |
+| `kube-do daemon` | Run the cluster management HTTP API with asynchronous install, worker addition, backup, certificate checks, cancellation, and persistent job history |
 | `kube-do etcd backup` | Save an etcd snapshot from the first control-plane node and fetch it to the Installer Host |
 | `kube-do certs check` | Check Kubernetes certificate expiration on every control-plane node |
 | `kube-do manifest bump` | Create a new Resource Manifest from explicit component versions |
@@ -453,6 +453,7 @@ Validated scenarios include:
 - Containerized HAProxy and keepalived, including VIP failover and node reboot recovery.
 - Cilium kube-proxy replacement, CoreDNS, and Hubble Relay readiness.
 - Fedora 44 `amd64` lab installation with three control-plane nodes and five workers.
+- Daemon API normal-path E2E on the Fedora lab: authentication, cluster registration, duplicate/unsupported requests, same-cluster job conflict, etcd backup with `etcdutl` validation and checksum verification, structured certificate checks, task cancellation semantics, and job history recovery after daemon restart.
 
 Still unvalidated:
 
@@ -460,8 +461,9 @@ Still unvalidated:
 - End-to-end installation of Debian 13, Ubuntu 22.04/24.04, and all `arm64` targets.
 - Arbitrary installer/target glibc ABI combinations.
 - Long-running stability, abrupt power-loss recovery, and every interrupted-installation recovery path.
+- etcd restore drills, certificate renewal, upgrades, rollbacks, control-plane scaling, node removal, network partitions, and multi-OS/architecture API E2E.
 
-The automated tests cover configuration parsing, manifest validation, archive extraction safety, downloads, registry handling, rendering, and installation command construction.
+The automated tests cover configuration parsing, manifest validation, archive extraction safety, downloads, registry handling, rendering, installation command construction, job lifecycle and persistence, certificate output parsing, and backup metadata validation. The real API harness is documented in [docs/e2e.md](docs/e2e.md).
 
 ## Security and operational boundaries
 
@@ -482,6 +484,8 @@ Use a dedicated management network, restrict access to ports `8080` and `5000`, 
 - No in-place Kubernetes upgrades or Build rollback.
 - No control-plane scaling, node removal, or cluster uninstall workflow.
 - etcd backup and certificate inspection are supported, but automated etcd restore and certificate renewal are not.
+- API jobs are not resumed after a daemon restart; running jobs are marked interrupted.
+- Certificates missing on joined control-plane nodes are reported but not classified as an error automatically.
 - No registry authentication, RBAC, web UI, or replication.
 - No supported cross-architecture build path for HAProxy and keepalived images.
 - No non-Linux target support.
@@ -498,6 +502,12 @@ gofmt -l ./cmd ./internal ./manifests
 go vet ./...
 go test ./...
 go test -race ./...
+```
+
+Run the real daemon API E2E against an existing cluster with:
+
+```bash
+KUBE_DO_E2E_CONFIG=/path/to/cluster.yaml hack/e2e-daemon.sh
 ```
 
 Generate the Ansible inventory and run a syntax check:
@@ -529,6 +539,7 @@ Generated directories such as `rendered/`, `dist/`, `registry-bundle*/`, and loc
 ## Documentation
 
 - [Glossary](GLOSSARY.md)
+- [daemon API E2E](docs/e2e.md)
 - [Architecture decision records](docs/adr)
 - [Example cluster configuration](examples/cluster.yaml)
 - [Release workflow](.github/workflows/release.yml)
