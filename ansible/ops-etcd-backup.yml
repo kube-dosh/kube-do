@@ -1,0 +1,82 @@
+---
+- name: Back up etcd from the first control-plane node
+  hosts: control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Validate backup parameters
+      ansible.builtin.assert:
+        that:
+          - kube_do_backup_dir is defined
+          - kube_do_backup_dir is match('^/')
+          - kube_do_backup_filename is defined
+          - kube_do_backup_filename | length > 0
+          - kube_do_backup_timestamp is defined
+        fail_msg: "kube-do backup parameters are incomplete"
+
+    - name: Find the local etcd static pod
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - --namespace
+          - kube-system
+          - get
+          - pods
+          - --selector=component=etcd,tier=control-plane
+          - --output=jsonpath={.items[0].metadata.name}
+      register: kube_do_etcd_pod
+      changed_when: false
+
+    - name: Assert that an etcd pod was found
+      ansible.builtin.assert:
+        that:
+          - kube_do_etcd_pod.stdout | trim != ''
+        fail_msg: "no local etcd static pod was found"
+
+    - name: Save the etcd snapshot inside the etcd hostPath
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - --namespace
+          - kube-system
+          - exec
+          - "{{ kube_do_etcd_pod.stdout | trim }}"
+          - --
+          - /usr/local/bin/etcdctl
+          - --endpoints=https://127.0.0.1:2379
+          - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+          - --cert=/etc/kubernetes/pki/etcd/server.crt
+          - --key=/etc/kubernetes/pki/etcd/server.key
+          - snapshot
+          - save
+          - "/var/lib/etcd/{{ kube_do_backup_filename }}"
+      register: kube_do_etcd_snapshot
+      changed_when: true
+
+    - name: Inspect the local snapshot
+      ansible.builtin.stat:
+        path: "/var/lib/etcd/{{ kube_do_backup_filename }}"
+        checksum_algorithm: sha256
+      register: kube_do_etcd_snapshot_stat
+
+    - name: Fetch the snapshot to the Installer Host
+      ansible.builtin.fetch:
+        src: "/var/lib/etcd/{{ kube_do_backup_filename }}"
+        dest: "{{ kube_do_backup_dir }}/"
+        flat: true
+
+    - name: Write snapshot metadata
+      ansible.builtin.copy:
+        dest: "{{ kube_do_backup_dir }}/{{ kube_do_backup_filename }}.json"
+        mode: '0600'
+        content: "{{ {'cluster': cluster_name, 'filename': kube_do_backup_filename, 'createdAt': kube_do_backup_timestamp, 'sha256': kube_do_etcd_snapshot_stat.stat.checksum, 'size': kube_do_etcd_snapshot_stat.stat.size, 'etcdPod': kube_do_etcd_pod.stdout | trim} | to_nice_json }}\n"
+      delegate_to: localhost
+
+    - name: Remove the temporary snapshot from the control-plane node
+      ansible.builtin.file:
+        path: "/var/lib/etcd/{{ kube_do_backup_filename }}"
+        state: absent

@@ -74,6 +74,7 @@ type Job struct {
 	Error      string     `json:"error,omitempty"`
 	NewWorkers []Node     `json:"newWorkers,omitempty"`
 	LogBytes   int        `json:"logBytes"`
+	Result     any        `json:"result,omitempty"`
 }
 
 func toNode(n cluster.Node) Node {

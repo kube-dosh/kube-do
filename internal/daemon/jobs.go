@@ -108,6 +108,18 @@ func (m *JobManager) Get(id string) (Job, bool) {
 	return rec.snapshot(), true
 }
 
+func (m *JobManager) SetResult(id string, value any) {
+	m.mu.RLock()
+	rec := m.jobs[id]
+	m.mu.RUnlock()
+	if rec == nil {
+		return
+	}
+	rec.mu.Lock()
+	rec.job.Result = value
+	rec.mu.Unlock()
+}
+
 func (m *JobManager) Logs(id string) (string, bool) {
 	m.mu.RLock()
 	rec := m.jobs[id]

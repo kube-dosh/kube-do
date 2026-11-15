@@ -69,6 +69,48 @@ daemon 会生成只包含新 Worker 的 `new_workers` Inventory，执行 `ansibl
 
 当前仅支持 Worker 增量纳管。控制平面扩容涉及 etcd 成员、证书和 HA 配置，尚未开放 API。
 
+## etcd 备份
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/etcd-backups \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN"
+```
+
+任务成功后，任务对象的 `result` 包含快照的本地路径、SHA-256、大小和创建时间：
+
+```json
+{
+  "result": {
+    "cluster": "demo",
+    "path": "/var/lib/kube-do/daemon/backups/demo/demo-etcd-20261115T120000Z.db",
+    "sha256": "...",
+    "size": 12345678,
+    "createdAt": "2026-11-15T12:00:00Z"
+  }
+}
+```
+
+快照由第一个控制平面节点通过 `etcdctl snapshot save` 生成，暂存于 etcd 的 hostPath，随后由 Ansible 拉取到 daemon 数据目录。对应 CLI 命令为：
+
+```bash
+kube-do etcd backup \
+  --config cluster.yaml \
+  --backup-dir ./etcd-backups
+```
+
+## 证书检查
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/certs/check \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN"
+```
+
+任务会在每个控制平面节点执行 `kubeadm certs check-expiration`，结果输出在任务日志中。对应 CLI 命令为：
+
+```bash
+kube-do certs check --config cluster.yaml
+```
+
 ## 查询
 
 ```bash
@@ -98,6 +140,7 @@ curl -sS http://127.0.0.1:8090/api/v1/jobs/<job-id>/logs \
 ## 当前边界
 
 - 不提供集群卸载、节点删除、原地升级或控制平面扩容 API。
+- 不提供 etcd 自动恢复、证书自动轮换或控制平面静态 Pod 自动重启 API。
 - daemon 不在重启后恢复正在执行的任务；任务历史也不持久化。
 - API 默认不做 TLS 终止。跨主机访问时建议放在反向代理后，或额外配置网络访问控制。
 - `prepare` 会操作安装机的 Registry 和 systemd 服务，通常需要 root 权限。

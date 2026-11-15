@@ -358,6 +358,8 @@ The registry does not implement authentication or RBAC. Anyone who can reach por
 | `kube-do render` | Generate the Ansible inventory and group variables |
 | `kube-do install` | Run the Ansible installation |
 | `kube-do daemon` | Run the cluster management HTTP API with asynchronous install, worker addition, and job/log queries |
+| `kube-do etcd backup` | Save an etcd snapshot from the first control-plane node and fetch it to the Installer Host |
+| `kube-do certs check` | Check Kubernetes certificate expiration on every control-plane node |
 | `kube-do manifest bump` | Create a new Resource Manifest from explicit component versions |
 
 Use `kube-do <command> --help` for the complete flag set. See [docs/api.md](docs/api.md) for HTTP API startup, request examples, and current limitations.
@@ -479,6 +481,7 @@ Use a dedicated management network, restrict access to ports `8080` and `5000`, 
 
 - No in-place Kubernetes upgrades or Build rollback.
 - No control-plane scaling, node removal, or cluster uninstall workflow.
+- etcd backup and certificate inspection are supported, but automated etcd restore and certificate renewal are not.
 - No registry authentication, RBAC, web UI, or replication.
 - No supported cross-architecture build path for HAProxy and keepalived images.
 - No non-Linux target support.

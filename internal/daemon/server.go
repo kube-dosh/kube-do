@@ -130,6 +130,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/clusters/{name}", s.handleGetCluster)
 	mux.HandleFunc("POST /api/v1/clusters/{name}/install", s.handleInstallCluster)
 	mux.HandleFunc("POST /api/v1/clusters/{name}/nodes", s.handleAddNodes)
+	mux.HandleFunc("POST /api/v1/clusters/{name}/etcd-backups", s.handleEtcdBackup)
+	mux.HandleFunc("POST /api/v1/clusters/{name}/certs/check", s.handleCheckCerts)
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
 	mux.HandleFunc("GET /api/v1/jobs/{id}/logs", s.handleGetJobLogs)
@@ -306,6 +308,70 @@ func (s *Server) handleAddNodes(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return s.store.Save(&updated)
+	})
+	if errors.Is(err, ErrClusterBusy) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleEtcdBackup(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cfg, err := s.store.Load(name)
+	if errors.Is(err, ErrClusterNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	backupDir := filepath.Join(s.opts.DataDir, "backups", name)
+	job, err := s.jobs.Start("etcd-backup", name, nil, func(ctx context.Context, id string, log io.Writer) error {
+		workDir, err := ensureWorkDir(s.opts.DataDir, id)
+		if err != nil {
+			return err
+		}
+		result, err := s.opts.Executor.BackupEtcd(ctx, cfg, workDir, backupDir, log)
+		if err != nil {
+			return err
+		}
+		s.jobs.SetResult(id, result)
+		return nil
+	})
+	if errors.Is(err, ErrClusterBusy) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleCheckCerts(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cfg, err := s.store.Load(name)
+	if errors.Is(err, ErrClusterNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	job, err := s.jobs.Start("certs-check", name, nil, func(ctx context.Context, id string, log io.Writer) error {
+		workDir, err := ensureWorkDir(s.opts.DataDir, id)
+		if err != nil {
+			return err
+		}
+		return s.opts.Executor.CheckCerts(ctx, cfg, workDir, log)
 	})
 	if errors.Is(err, ErrClusterBusy) {
 		writeError(w, http.StatusConflict, err.Error())

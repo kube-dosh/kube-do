@@ -1,0 +1,14 @@
+---
+- name: Check Kubernetes certificate expiration
+  hosts: control_plane
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Run kubeadm certificate expiration check
+      ansible.builtin.command: /usr/local/bin/kubeadm certs check-expiration
+      register: kube_do_cert_expiration
+      changed_when: false
+
+    - name: Show certificate expiration
+      ansible.builtin.debug:
+        var: kube_do_cert_expiration.stdout_lines

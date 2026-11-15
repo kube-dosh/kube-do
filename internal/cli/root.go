@@ -21,6 +21,8 @@ func NewRootCmd() *cobra.Command {
 		newDownloadCmd(),
 		newInstallCmd(),
 		newDaemonCmd(),
+		newEtcdCmd(),
+		newCertsCmd(),
 		newManifestCmd(),
 	)
 	return cmd

@@ -15,12 +15,15 @@ import (
 	"time"
 
 	"github.com/kube-dosh/kube-do/internal/cluster"
+	"github.com/kube-dosh/kube-do/internal/ops"
 )
 
 type fakeExecutor struct {
-	mu        sync.Mutex
-	installed bool
-	added     []cluster.Node
+	mu           sync.Mutex
+	installed    bool
+	added        []cluster.Node
+	backedUp     bool
+	checkedCerts bool
 }
 
 func (f *fakeExecutor) Install(_ context.Context, cfg *cluster.Config, _ InstallRequest, _ string, log io.Writer) error {
@@ -36,6 +39,28 @@ func (f *fakeExecutor) AddWorkers(_ context.Context, _ *cluster.Config, newWorke
 	defer f.mu.Unlock()
 	f.added = append(f.added, newWorkers...)
 	fmt.Fprintf(log, "added %d workers\n", len(newWorkers))
+	return nil
+}
+
+func (f *fakeExecutor) BackupEtcd(_ context.Context, cfg *cluster.Config, _, backupDir string, log io.Writer) (ops.BackupResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.backedUp = true
+	result := ops.BackupResult{
+		Cluster: cfg.Metadata.Name,
+		Path:    backupDir + "/snapshot.db",
+		SHA256:  strings.Repeat("a", 64),
+		Size:    1024,
+	}
+	fmt.Fprintln(log, "etcd backup complete")
+	return result, nil
+}
+
+func (f *fakeExecutor) CheckCerts(_ context.Context, _ *cluster.Config, _ string, log io.Writer) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checkedCerts = true
+	fmt.Fprintln(log, "certificate check complete")
 	return nil
 }
 
@@ -185,6 +210,36 @@ func TestClusterLifecycleAPI(t *testing.T) {
 	}
 	if !strings.Contains(string(logs), "added 1 workers") {
 		t.Fatalf("logs = %q", logs)
+	}
+
+	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/etcd-backups", "", nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("etcd backup status = %d", resp.StatusCode)
+	}
+	backupJob := decode[Job](t, resp)
+	backupJob = waitJob(t, base, backupJob.ID)
+	if backupJob.Status != JobSucceeded {
+		t.Fatalf("etcd backup job = %#v", backupJob)
+	}
+	result, ok := backupJob.Result.(map[string]any)
+	if !ok || result["path"] == "" {
+		t.Fatalf("etcd backup result = %#v", backupJob.Result)
+	}
+
+	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/certs/check", "", nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("certs check status = %d", resp.StatusCode)
+	}
+	certJob := decode[Job](t, resp)
+	certJob = waitJob(t, base, certJob.ID)
+	if certJob.Status != JobSucceeded {
+		t.Fatalf("certs check job = %#v", certJob)
+	}
+	executor.mu.Lock()
+	backedUp, checkedCerts := executor.backedUp, executor.checkedCerts
+	executor.mu.Unlock()
+	if !backedUp || !checkedCerts {
+		t.Fatalf("executor calls: backup=%v certs=%v", backedUp, checkedCerts)
 	}
 }
 

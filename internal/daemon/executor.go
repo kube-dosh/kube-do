@@ -16,6 +16,7 @@ import (
 	"github.com/kube-dosh/kube-do/internal/install"
 	"github.com/kube-dosh/kube-do/internal/layout"
 	"github.com/kube-dosh/kube-do/internal/manifest"
+	"github.com/kube-dosh/kube-do/internal/ops"
 	"github.com/kube-dosh/kube-do/internal/registry"
 	"github.com/kube-dosh/kube-do/internal/render"
 	"github.com/kube-dosh/kube-do/manifests"
@@ -24,6 +25,8 @@ import (
 type Executor interface {
 	Install(ctx context.Context, cfg *cluster.Config, req InstallRequest, workDir string, log io.Writer) error
 	AddWorkers(ctx context.Context, cfg *cluster.Config, newWorkers []cluster.Node, workDir string, log io.Writer) error
+	BackupEtcd(ctx context.Context, cfg *cluster.Config, workDir, backupDir string, log io.Writer) (ops.BackupResult, error)
+	CheckCerts(ctx context.Context, cfg *cluster.Config, workDir string, log io.Writer) error
 }
 
 // HostExecutor runs the existing kube-do resource and Ansible pipeline.
@@ -168,6 +171,22 @@ func (e *HostExecutor) AddWorkers(ctx context.Context, cfg *cluster.Config, newW
 		Stdout:     log,
 		Stderr:     log,
 	})
+}
+
+func (e *HostExecutor) BackupEtcd(ctx context.Context, cfg *cluster.Config, workDir, backupDir string, log io.Writer) (ops.BackupResult, error) {
+	m, err := e.manifestFor(cfg)
+	if err != nil {
+		return ops.BackupResult{}, err
+	}
+	return ops.BackupEtcd(ctx, cfg, m, e.AnsibleDir, workDir, backupDir, log)
+}
+
+func (e *HostExecutor) CheckCerts(ctx context.Context, cfg *cluster.Config, workDir string, log io.Writer) error {
+	m, err := e.manifestFor(cfg)
+	if err != nil {
+		return err
+	}
+	return ops.CheckCerts(ctx, cfg, m, e.AnsibleDir, workDir, log)
 }
 
 func (e *HostExecutor) manifestFor(cfg *cluster.Config) (*manifest.Manifest, error) {

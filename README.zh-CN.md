@@ -359,6 +359,8 @@ Registry 不提供认证或 RBAC。任何能访问 `5000` 端口的主体都可�
 | `kube-do render` | 生成 Ansible Inventory 与 Group Variables |
 | `kube-do install` | 执行 Ansible 安装 |
 | `kube-do daemon` | 启动集群管理 HTTP API，支持异步安装、Worker 增量纳管与任务/日志查询 |
+| `kube-do etcd backup` | 从第一个控制平面节点保存 etcd 快照并拉取到安装机 |
+| `kube-do certs check` | 检查所有控制平面节点的 Kubernetes 证书有效期 |
 | `kube-do manifest bump` | 按显式组件版本生成新的 Resource Manifest |
 
 完整参数请执行 `kube-do <command> --help`。HTTP API 的启动方式、请求示例和当前边界见 [docs/api.md](docs/api.md)。
@@ -480,6 +482,7 @@ kube-do 面向受控的隔离环境。使用前请确认以下运维特征：
 
 - 不支持 Kubernetes 原地升级或 Build 回滚。
 - 不支持控制平面扩容、节点移除或集群卸载。
+- 支持 etcd 备份和证书检查，但尚不自动执行 etcd 恢复或证书轮换。
 - Registry 不支持认证、RBAC、Web UI 或复制。
 - 不支持 HAProxy 与 keepalived 镜像的跨架构构建。
 - 不支持非 Linux 目标节点。
