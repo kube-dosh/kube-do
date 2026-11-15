@@ -14,7 +14,7 @@ kube-do is an opinionated, air-gapped Kubernetes installer for RHEL-family and D
 The project is designed for isolated data centers, regulated environments, edge sites, and lab platforms where repeatability and explicit dependency control matter more than access to the latest upstream packages.
 
 > [!WARNING]
-> kube-do is under active development and is **not production-ready**. It currently supports fresh installations only; upgrades, node scaling, registry authentication, and long-running production validation are out of scope for the current release. Evaluate it in a disposable or non-critical environment first.
+> kube-do is under active development and is **not production-ready**. It supports fresh installations and worker-only incremental node addition through the daemon API. Upgrades, control-plane scaling, node removal, registry authentication, and long-running production validation are out of scope for the current release. Evaluate it in a disposable or non-critical environment first.
 
 ## Contents
 
@@ -357,9 +357,10 @@ The registry does not implement authentication or RBAC. Anyone who can reach por
 | `kube-do serve` | Serve cached artifacts over HTTP |
 | `kube-do render` | Generate the Ansible inventory and group variables |
 | `kube-do install` | Run the Ansible installation |
+| `kube-do daemon` | Run the cluster management HTTP API with asynchronous install, worker addition, and job/log queries |
 | `kube-do manifest bump` | Create a new Resource Manifest from explicit component versions |
 
-Use `kube-do <command> --help` for the complete flag set.
+Use `kube-do <command> --help` for the complete flag set. See [docs/api.md](docs/api.md) for HTTP API startup, request examples, and current limitations.
 
 ## Installation lifecycle
 
@@ -465,6 +466,7 @@ The automated tests cover configuration parsing, manifest validation, archive ex
 kube-do is intended for controlled, isolated environments. Before using it, review the following operational characteristics:
 
 - The Download Server uses plain HTTP without authentication.
+- The daemon API binds to loopback by default and should use a bearer token when exposed to a management network.
 - The private registry uses TLS but no authentication or authorization.
 - HAProxy and keepalived run with `hostNetwork`; keepalived also uses `hostPID` and additional network capabilities.
 - RHEL-family target nodes have SELinux disabled by design.
@@ -476,7 +478,7 @@ Use a dedicated management network, restrict access to ports `8080` and `5000`, 
 ## Known limitations
 
 - No in-place Kubernetes upgrades or Build rollback.
-- No node scaling or node removal workflow.
+- No control-plane scaling, node removal, or cluster uninstall workflow.
 - No registry authentication, RBAC, web UI, or replication.
 - No supported cross-architecture build path for HAProxy and keepalived images.
 - No non-Linux target support.

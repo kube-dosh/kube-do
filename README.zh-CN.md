@@ -14,7 +14,7 @@ kube-do 是一个面向 RHEL 系与 Debian 系 Linux 的离线（air-gapped）Ku
 kube-do 适用于隔离数据中心、合规环境、边缘站点，以及强调可重复性和依赖可控性的实验平台。
 
 > [!WARNING]
-> kube-do 仍在积极开发中，**尚未达到生产可用标准**。当前版本只支持全新安装；原地升级、节点扩缩容、Registry 认证和长期生产环境验证不在当前范围内。请先在可丢弃或非关键环境中评估。
+> kube-do 仍在积极开发中，**尚未达到生产可用标准**。当前版本支持全新安装，以及通过 daemon API 增量新增 Worker；原地升级、控制平面扩容、节点移除、Registry 认证和长期生产环境验证不在当前范围内。请先在可丢弃或非关键环境中评估。
 
 ## 目录
 
@@ -26,6 +26,7 @@ kube-do 适用于隔离数据中心、合规环境、边缘站点，以及强调
 - [快速开始](#快速开始)
 - [配置](#配置)
 - [CLI 命令](#cli-命令)
+- [HTTP API](docs/api.md)
 - [安装生命周期](#安装生命周期)
 - [Build 与发布产物](#build-与发布产物)
 - [验证状态](#验证状态)
@@ -357,9 +358,10 @@ Registry 不提供认证或 RBAC。任何能访问 `5000` 端口的主体都可�
 | `kube-do serve` | 通过 HTTP 提供缓存资源 |
 | `kube-do render` | 生成 Ansible Inventory 与 Group Variables |
 | `kube-do install` | 执行 Ansible 安装 |
+| `kube-do daemon` | 启动集群管理 HTTP API，支持异步安装、Worker 增量纳管与任务/日志查询 |
 | `kube-do manifest bump` | 按显式组件版本生成新的 Resource Manifest |
 
-完整参数请执行 `kube-do <command> --help`。
+完整参数请执行 `kube-do <command> --help`。HTTP API 的启动方式、请求示例和当前边界见 [docs/api.md](docs/api.md)。
 
 ## 安装生命周期
 
@@ -465,6 +467,7 @@ sha256sum -c checksums.txt
 kube-do 面向受控的隔离环境。使用前请确认以下运维特征：
 
 - Download Server 使用无认证的明文 HTTP。
+- daemon API 默认只监听回环地址；开放到管理网络时应启用 Bearer Token。
 - 私有 Registry 使用 TLS，但不提供认证或授权。
 - HAProxy 与 keepalived 使用 `hostNetwork`；keepalived 还使用 `hostPID` 和额外网络 Capability。
 - RHEL 系目标节点会按设计禁用 SELinux。
@@ -476,7 +479,7 @@ kube-do 面向受控的隔离环境。使用前请确认以下运维特征：
 ## 已知限制
 
 - 不支持 Kubernetes 原地升级或 Build 回滚。
-- 不支持节点扩容、缩容或移除。
+- 不支持控制平面扩容、节点移除或集群卸载。
 - Registry 不支持认证、RBAC、Web UI 或复制。
 - 不支持 HAProxy 与 keepalived 镜像的跨架构构建。
 - 不支持非 Linux 目标节点。

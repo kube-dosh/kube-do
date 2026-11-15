@@ -4,13 +4,21 @@
     path: /etc/kubernetes/kubelet.conf
   register: kube_do_kubelet_conf
 
-- name: Assert that the first control-plane node published join data
+- name: Assert that the first control-plane node published a join command
   ansible.builtin.assert:
     that:
       - hostvars[groups['control_plane'][0]].kubeadm_join_command is defined
-      - hostvars[groups['control_plane'][0]].kubeadm_certificate_key is defined
     fail_msg: "The kubeadm init role did not publish join data"
   when: not kube_do_kubelet_conf.stat.exists
+
+- name: Assert that the first control-plane node published a certificate key
+  ansible.builtin.assert:
+    that:
+      - hostvars[groups['control_plane'][0]].kubeadm_certificate_key is defined
+    fail_msg: "The kubeadm init role did not publish the control-plane certificate key"
+  when:
+    - not kube_do_kubelet_conf.stat.exists
+    - join_control_plane | default(false) | bool
 
 - name: Join a control-plane node
   ansible.builtin.command:

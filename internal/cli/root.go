@@ -20,6 +20,7 @@ func NewRootCmd() *cobra.Command {
 		newRegistryCmd(),
 		newDownloadCmd(),
 		newInstallCmd(),
+		newDaemonCmd(),
 		newManifestCmd(),
 	)
 	return cmd
