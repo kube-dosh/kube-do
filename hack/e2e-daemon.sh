@@ -13,12 +13,21 @@ if [[ ! -f "$KUBE_DO_E2E_CONFIG" ]]; then
   exit 2
 fi
 
-for command in curl jq go sha256sum ansible-playbook; do
+for command in curl jq sha256sum ansible-playbook; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "required command not found: $command" >&2
     exit 2
   fi
 done
+if [[ -z "${KUBE_DO_E2E_BIN:-}" ]]; then
+  command -v go >/dev/null 2>&1 || {
+    echo "required command not found: go (or set KUBE_DO_E2E_BIN to a prebuilt kube-do binary)" >&2
+    exit 2
+  }
+elif [[ ! -x "${KUBE_DO_E2E_BIN}" ]]; then
+  echo "KUBE_DO_E2E_BIN is not executable: ${KUBE_DO_E2E_BIN}" >&2
+  exit 2
+fi
 
 TOKEN=${KUBE_DO_E2E_TOKEN:-e2e-$RANDOM-$RANDOM}
 ADDR=${KUBE_DO_E2E_ADDR:-127.0.0.1:18090}
@@ -151,8 +160,12 @@ wait_job() {
   fail "job $id did not finish within ${timeout_seconds}s"
 }
 
-echo "building kube-do"
-(cd "$ROOT" && CGO_ENABLED=0 go build -trimpath -o "$BIN" ./cmd/kube-do)
+if [[ -x "$BIN" ]]; then
+  echo "using prebuilt kube-do: $BIN"
+else
+  echo "building kube-do"
+  (cd "$ROOT" && CGO_ENABLED=0 go build -trimpath -o "$BIN" ./cmd/kube-do)
+fi
 
 echo "starting daemon on $ADDR"
 start_daemon

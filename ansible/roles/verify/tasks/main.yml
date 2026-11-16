@@ -9,7 +9,7 @@
       - --for=condition=Ready
       - nodes
       - --all
-      - --timeout=10m
+      - "--timeout={{ kube_do_node_ready_timeout }}"
   changed_when: false
 
 - name: Wait for the Cilium operator
@@ -23,7 +23,7 @@
       - rollout
       - status
       - deployment/cilium-operator
-      - --timeout=10m
+      - "--timeout={{ kube_do_cilium_operator_rollout_timeout }}"
   changed_when: false
 
 - name: Wait for CoreDNS
@@ -37,7 +37,7 @@
       - rollout
       - status
       - deployment/coredns
-      - --timeout=10m
+      - "--timeout={{ kube_do_coredns_rollout_timeout }}"
   changed_when: false
 
 - name: Wait for the Hubble relay
@@ -51,7 +51,7 @@
       - rollout
       - status
       - deployment/hubble-relay
-      - --timeout=10m
+      - "--timeout={{ kube_do_hubble_rollout_timeout }}"
   changed_when: false
 
 - name: Verify kube-proxy is absent

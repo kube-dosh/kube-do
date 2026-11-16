@@ -39,8 +39,9 @@ type Options struct {
 	CacheDir        string
 	RegistryAddress string
 	Manifest        *manifest.Manifest
-	// OS and Arch select the target platform. They must match the Installer
-	// Host because built Artifacts (HAProxy and keepalived) are not cross-built.
+	// OS and Arch select the target platform. They currently must match the
+	// Installer Host because the Registry binary and the legacy HA build
+	// fallback are native programs.
 	OS           string
 	Arch         string
 	BinariesOnly bool
@@ -87,13 +88,13 @@ func Run(ctx context.Context, opts Options) (Summary, error) {
 		return sum, fmt.Errorf("build %q does not support platform %s/%s", opts.Manifest.Metadata.Name, opts.OS, opts.Arch)
 	}
 	if runtime.GOOS != opts.OS || runtime.GOARCH != opts.Arch {
-		return sum, fmt.Errorf("Installer Host is %s/%s but target is %s/%s; built HA artifacts cannot be cross-compiled", runtime.GOOS, runtime.GOARCH, opts.OS, opts.Arch)
+		return sum, fmt.Errorf("Installer Host is %s/%s but target is %s/%s; run kube-do on a host matching the target platform", runtime.GOOS, runtime.GOARCH, opts.OS, opts.Arch)
 	}
 
 	if !opts.ImagesOnly {
 		binaries := make([]manifest.Binary, 0)
 		binaries = append(binaries, opts.Manifest.BinariesFor(opts.OS, opts.Arch)...)
-		binaries = append(binaries, opts.Manifest.InstallerBinariesFor(opts.OS, opts.Arch)...)
+		binaries = append(binaries, opts.Manifest.RequiredInstallerBinariesFor(opts.OS, opts.Arch)...)
 		if len(binaries) == 0 {
 			return sum, fmt.Errorf("build %q has no binaries for %s/%s", opts.Manifest.Metadata.Name, opts.OS, opts.Arch)
 		}
@@ -116,6 +117,13 @@ func Run(ctx context.Context, opts Options) (Summary, error) {
 			return sum, err
 		}
 		for _, img := range opts.Manifest.InstallerImagesFor(opts.OS, opts.Arch) {
+			if img.IsPrebuilt() {
+				if err := mirrorInstallerImage(img, opts, remoteOpts); err != nil {
+					return sum, fmt.Errorf("mirror Installer image %s: %w", img.Name, err)
+				}
+				sum.Mirrored++
+				continue
+			}
 			if err := pushInstallerImage(img, opts, remoteOpts); err != nil {
 				return sum, fmt.Errorf("build Installer image %s: %w", img.Name, err)
 			}
@@ -453,13 +461,25 @@ func verifyFile(path, want string) (bool, error) {
 }
 
 func mirrorImage(img manifest.Image, opts Options, remoteOpts []remote.Option) error {
-	src, err := parseRef(img.Source, opts.Insecure)
-	if err != nil {
-		return fmt.Errorf("parse source: %w", err)
-	}
 	target, err := img.TargetRef(opts.RegistryAddress, opts.Manifest.Spec.Registry.Namespace)
 	if err != nil {
 		return err
+	}
+	return copyRemoteImage(img.Source, target, "", opts, remoteOpts)
+}
+
+func mirrorInstallerImage(img manifest.InstallerImage, opts Options, remoteOpts []remote.Option) error {
+	target, err := img.TargetRef(opts.RegistryAddress, opts.Manifest.Spec.Registry.Namespace)
+	if err != nil {
+		return err
+	}
+	return copyRemoteImage(img.Source, target, img.Digest, opts, remoteOpts)
+}
+
+func copyRemoteImage(source, target, wantDigest string, opts Options, remoteOpts []remote.Option) error {
+	src, err := parseRef(source, opts.Insecure)
+	if err != nil {
+		return fmt.Errorf("parse source: %w", err)
 	}
 	dst, err := parseRef(target, opts.Insecure)
 	if err != nil {
@@ -469,6 +489,12 @@ func mirrorImage(img manifest.Image, opts Options, remoteOpts []remote.Option) e
 	desc, err := remote.Get(src, remoteOpts...)
 	if err != nil {
 		return err
+	}
+	if wantDigest != "" && desc.Digest.String() != wantDigest {
+		return fmt.Errorf("source digest %s does not match pinned digest %s", desc.Digest, wantDigest)
+	}
+	if wantDigest != "" && (desc.MediaType == types.OCIImageIndex || desc.MediaType == types.DockerManifestList) {
+		return errors.New("prebuilt Installer image must be a single-platform manifest, not an image index")
 	}
 	switch desc.MediaType {
 	case types.OCIImageIndex, types.DockerManifestList:
@@ -486,6 +512,15 @@ func mirrorImage(img manifest.Image, opts Options, remoteOpts []remote.Option) e
 		}
 		if err := remote.Write(dst, image, remoteOpts...); err != nil {
 			return err
+		}
+	}
+	if wantDigest != "" {
+		dstDesc, err := remote.Get(dst, remoteOpts...)
+		if err != nil {
+			return fmt.Errorf("verify mirrored image: %w", err)
+		}
+		if dstDesc.Digest.String() != wantDigest {
+			return fmt.Errorf("mirrored digest %s does not match pinned digest %s", dstDesc.Digest, wantDigest)
 		}
 	}
 	logf(opts, "ok     %s", dst)
@@ -531,11 +566,14 @@ func buildTransport(caFile string) (*http.Transport, error) {
 		}
 	}
 	return &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
-		DialContext:         (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool},
-		TLSHandshakeTimeout: 10 * time.Second,
-		ForceAttemptHTTP2:   true,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 2 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+		ExpectContinueTimeout: time.Second,
+		ForceAttemptHTTP2:     true,
 	}, nil
 }
 

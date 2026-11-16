@@ -40,7 +40,7 @@ The project is designed for isolated data centers, regulated environments, edge 
 
 kube-do separates installation into two layers:
 
-- **Resource layer:** the `kube-do` CLI downloads and verifies artifacts, builds the HAProxy and keepalived images, deploys or reuses a private OCI registry, mirrors images, serves binaries over HTTP, and renders Ansible configuration.
+- **Resource layer:** the `kube-do` CLI downloads and verifies artifacts, mirrors digest-pinned HAProxy and keepalived runtime images when the Build provides prebuilt sources, deploys or reuses a private OCI registry, mirrors images, serves binaries over HTTP, and renders Ansible configuration. Legacy or offline Builds can still fall back to locally assembled HA images.
 - **Cluster layer:** Ansible configures hosts, installs containerd, configures the control-plane VIP and API load balancer, runs `kubeadm`, installs Cilium, and verifies the cluster.
 
 The result is a repeatable workflow in which the installer host is the only machine that needs upstream network access. Every target node consumes a pinned set of artifacts from the installer host.
@@ -113,7 +113,7 @@ The control plane exposes Kubernetes through `<VIP>:<apiPort>`. HAProxy runs on 
 | `rhel` | RHEL-family 9, Rocky Linux 9, Fedora 44 | Fedora 44 is supported only when the installer host and all targets use Fedora 44. |
 | `debian` | Debian 12/13, Ubuntu 22.04/24.04 | The Debian family covers SELinux, firewall, swap, and package-manager differences. |
 
-Supported CPU architectures are `amd64` (`x86_64`) and `arm64` (`aarch64`). One Build can carry artifacts for both architectures, but the installer host must use the same architecture as the target cluster because HAProxy and keepalived are built natively on the installer host.
+Supported CPU architectures are `amd64` (`x86_64`) and `arm64` (`aarch64`). One Build can carry artifacts for both architectures. The installer host must currently use the same architecture as the target cluster because the Registry installer binary and the legacy local HA build fallback are native programs; the HA image workflow builds separate `amd64` and `arm64` images. Until the first GHCR images are published and pinned in the embedded Build, that Build still uses the local fallback.
 
 ### End-to-end validation status
 
@@ -121,8 +121,9 @@ Supported CPU architectures are `amd64` (`x86_64`) and `arm64` (`aarch64`). One 
 | --- | --- |
 | Rocky Linux 9.8 / `amd64` | End-to-end air-gapped installation validated with three control-plane nodes and one worker. |
 | Debian 12 / `amd64` | End-to-end air-gapped installation validated. |
-| Fedora 44 / `amd64` | Lab installation validated with three control-plane nodes and five workers. |
-| Debian 13, Ubuntu 22.04/24.04 | Supported by the code, Ansible paths, and resource checks; end-to-end installation still needs validation. |
+| Fedora 44 / `amd64` | Full air-gapped E2E validated in disposable libvirt with three control-plane nodes and one worker. |
+| Debian 13 / `amd64` | Full air-gapped E2E validated in disposable libvirt with three control-plane nodes and one worker. |
+| Ubuntu 22.04/24.04 | Supported by the code, Ansible paths, and resource checks; end-to-end installation still needs validation. |
 | All `arm64` targets | Resource and build paths are implemented; full cluster installation and HA image execution still need validation. |
 
 See [Validation status](#validation-status) for the detailed scope and known gaps.
@@ -135,10 +136,10 @@ See [Validation status](#validation-status) for the detailed scope and known gap
 - Root or passwordless sudo for Registry deployment, cache preparation, Download Server, and Ansible execution.
 - Outbound network access to upstream artifact and image sources when preparing a new Build.
 - `ansible-playbook` available on `PATH`.
-- `gcc`, `make`, `pkg-config`, and OpenSSL development headers for native HAProxy and keepalived builds. On RHEL-family systems this is typically `openssl-devel`; on Debian-family systems it is `libssl-dev`.
+- No C toolchain is required for the default digest-pinned HA image path. The offline fallback still requires `gcc`, `make`, `pkg-config`, and OpenSSL development headers; on RHEL-family systems this is typically `openssl-devel`, and on Debian-family systems it is `libssl-dev`.
 - SSH access to every control-plane and worker node. Key-based authentication is recommended.
 - Synchronized clocks across the installer host and all target nodes. kube-do does not configure NTP.
-- A C library on the installer host that is **not newer** than the target nodes. HAProxy and keepalived images contain libraries from the build host and can fail with `GLIBC_x.y not found` if the ABI is incompatible.
+- A C library on the installer host that is **not newer** than the target nodes when using the local fallback. Prebuilt HA images are built against the supported baseline and do not depend on the installer host's glibc.
 
 When installing from source, Go 1.27 is required. Release binaries are statically linked with `CGO_ENABLED=0` and do not require Go on the installer host.
 
@@ -182,7 +183,7 @@ kube-do check --config cluster.yaml
 
 `check` validates the configuration and the embedded Resource Manifest. Before artifacts are downloaded it reports them as missing, but the command still verifies that the selected Build, platform, and configuration are internally consistent.
 
-### 3. Download node binaries and build HA artifacts
+### 3. Download node binaries and prepare HA inputs
 
 ```bash
 sudo kube-do download \
@@ -191,7 +192,7 @@ sudo kube-do download \
   --cache-dir /var/cache/kube-do
 ```
 
-This step downloads the target-platform binaries, builds HAProxy and keepalived from pinned sources, and records reproducible build metadata. The HA binaries are inputs to the Installer images and are not distributed directly to target nodes.
+This step downloads the target-platform binaries. For a manifest with `source` and `digest` on its Installer images, HAProxy and keepalived are not compiled here; their unused fallback binaries are skipped as well, and the images are mirrored and digest-verified in the image step. The legacy `binary` form builds them from pinned sources and records reproducible build metadata, and is retained for offline recovery and development.
 
 ### 4. Deploy or reuse the private registry
 
@@ -212,7 +213,7 @@ sudo kube-do download \
   --cache-dir /var/cache/kube-do
 ```
 
-Node images are copied directly between registries without being written to local disk, preserving multi-architecture manifest indexes. Installer images for HAProxy and keepalived are assembled from the locally built binaries and their runtime libraries.
+Node images are copied directly between registries without being written to local disk, preserving multi-architecture manifest indexes. Prebuilt HAProxy and keepalived images are copied from their pinned `source` references and verified against `digest` before and after mirroring. Manifests that still use the `binary` fallback assemble the Installer image locally.
 
 ### 6. Serve artifacts and install the cluster
 
@@ -352,7 +353,7 @@ The registry does not implement authentication or RBAC. Anyone who can reach por
 | --- | --- |
 | `kube-do version` | Print version, commit, and build time |
 | `kube-do check` | Validate `cluster.yaml`, the Resource Manifest, input files, cached artifacts and build metadata; optionally probe the registry |
-| `kube-do download` | Download binaries, build HA images, and mirror node images |
+| `kube-do download` | Download binaries, mirror prebuilt HA images or assemble the local fallback, and mirror node images |
 | `kube-do registry` | Deploy or reuse the private registry |
 | `kube-do serve` | Serve cached artifacts over HTTP |
 | `kube-do render` | Generate the Ansible inventory and group variables |
@@ -392,7 +393,20 @@ They are independent. Updating the CLI does not automatically change the Resourc
 
 ### Resource Manifest
 
-Each Build is described by a YAML Resource Manifest under `manifests/builds/` and embedded into the CLI with `go:embed`. A manifest pins supported platforms, node binaries, installer binaries, generated installer images, and node images. Custom manifests can be supplied with `--manifest`.
+Each Build is described by a YAML Resource Manifest under `manifests/builds/` and embedded into the CLI with `go:embed`. A manifest pins supported platforms, node binaries, installer binaries, Installer images, and node images. Installer images should use `source` plus an immutable `digest`; the `binary` form is a compatibility fallback. Custom manifests can be supplied with `--manifest`.
+
+```yaml
+spec:
+  installer:
+    images:
+      - name: haproxy
+        version: 3.2.26
+        os: linux
+        arch: amd64
+        source: ghcr.io/kube-dosh/kube-do-haproxy:3.2.26-amd64
+        digest: sha256:<verified-digest>
+        target: haproxy:3.2.26-amd64
+```
 
 Create a new Build without modifying the base manifest:
 
@@ -411,6 +425,8 @@ CGO_ENABLED=0 go build -trimpath -o kube-do ./cmd/kube-do
 ```
 
 The `bump` command can update Kubernetes, Cilium, containerd, runc, CNI plugins, crictl, Helm, Cilium CLI, Distribution, HAProxy, and keepalived versions. It recalculates binary checksums, resolves dependent image versions, and never modifies the base manifest in place. Review the generated manifest before publishing it.
+
+Prebuilt HA images are published by the [HA runtime image workflow](.github/workflows/ha-images.yml) from the pinned source archives in the Resource Manifest. The workflow builds `amd64` and `arm64` images in an AlmaLinux 9 baseline and prints each published digest in the job summary. A manifest with prebuilt HA images is updated by rebuilding and publishing the images first, then pinning their new digests; `manifest bump` rejects automatic HA version changes for such a Build.
 
 ### Artifact cache
 
@@ -452,13 +468,15 @@ Validated scenarios include:
 - Fresh Debian 12 `amd64` installation with the same topology.
 - Containerized HAProxy and keepalived, including VIP failover and node reboot recovery.
 - Cilium kube-proxy replacement, CoreDNS, and Hubble Relay readiness.
-- Fedora 44 `amd64` lab installation with three control-plane nodes and five workers.
-- Daemon API normal-path E2E on the Fedora lab: authentication, cluster registration, duplicate/unsupported requests, same-cluster job conflict, etcd backup with `etcdutl` validation and checksum verification, structured certificate checks, task cancellation semantics, and job history recovery after daemon restart.
+- Fresh Fedora 44 `amd64` air-gapped installation with three control-plane nodes and one worker on isolated libvirt networks.
+- Fresh Debian 13 `amd64` air-gapped installation with the same topology.
+- Digest-pinned prebuilt HAProxy and keepalived image mirroring on Debian 13 `amd64`, including source/destination digest verification, HA container startup, and VIP API readiness without local HA compilation.
+- Daemon API normal-path E2E on both new installations: authentication, cluster registration, duplicate/unsupported requests, same-cluster job conflict, etcd backup with `etcdutl` validation and checksum verification, structured certificate checks, task cancellation semantics, and job history recovery after daemon restart.
 
 Still unvalidated:
 
 - Physical RHEL 9 hardware, non-default MTUs, complex switch topologies, and production network behavior.
-- End-to-end installation of Debian 13, Ubuntu 22.04/24.04, and all `arm64` targets.
+- End-to-end installation of Ubuntu 22.04/24.04 and all `arm64` targets.
 - Arbitrary installer/target glibc ABI combinations.
 - Long-running stability, abrupt power-loss recovery, and every interrupted-installation recovery path.
 - etcd restore drills, certificate renewal, upgrades, rollbacks, control-plane scaling, node removal, network partitions, and multi-OS/architecture API E2E.
@@ -475,7 +493,7 @@ kube-do is intended for controlled, isolated environments. Before using it, revi
 - HAProxy and keepalived run with `hostNetwork`; keepalived also uses `hostPID` and additional network capabilities.
 - RHEL-family target nodes have SELinux disabled by design.
 - Swap, zram, firewalld, and ufw are disabled on target nodes.
-- HAProxy and keepalived images inherit runtime libraries from the installer host and must be built in an ABI-compatible environment.
+- Prebuilt HAProxy and keepalived images carry a fixed AlmaLinux 9 runtime baseline. The legacy local-build fallback still inherits runtime libraries from the installer host and requires an ABI-compatible environment.
 
 Use a dedicated management network, restrict access to ports `8080` and `5000`, and do not expose the installer host directly to untrusted networks.
 
@@ -487,14 +505,14 @@ Use a dedicated management network, restrict access to ports `8080` and `5000`, 
 - API jobs are not resumed after a daemon restart; running jobs are marked interrupted.
 - Certificates missing on joined control-plane nodes are reported but not classified as an error automatically.
 - No registry authentication, RBAC, web UI, or replication.
-- No supported cross-architecture build path for HAProxy and keepalived images.
+- No on-host cross-architecture HA image build; use the CI-built, digest-pinned per-architecture images. The installer host still matches the target architecture for the Registry and legacy fallback.
 - No non-Linux target support.
 - No built-in SCP artifact distribution path.
 - No production hardening or long-term support guarantee yet.
 
 ## Development
 
-Prerequisites: Go 1.27 and the native HA build dependencies listed above. Ansible is required only when running the installation playbook.
+Prerequisites: Go 1.27. The native HA build dependencies listed above are needed only for the local-build fallback. Ansible is required only when running the installation playbook.
 
 ```bash
 CGO_ENABLED=0 go build -trimpath -o kube-do ./cmd/kube-do
@@ -553,6 +571,7 @@ Key architecture decisions:
 - [ADR-0005: Installer host ABI compatibility](docs/adr/0005-installer-host-build-abi.md)
 - [ADR-0006: Multi-platform manifests](docs/adr/0006-multi-platform-manifest-and-debian-arm64.md)
 - [ADR-0007: Containerized HAProxy and keepalived](docs/adr/0007-keepalived-runs-as-containerd-container.md)
+- [ADR-0008: Prebuilt HA runtime images](docs/adr/0008-prebuilt-ha-runtime-images.md)
 
 ## Contributing
 

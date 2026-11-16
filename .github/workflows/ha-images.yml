@@ -1,0 +1,127 @@
+name: HA runtime images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: ${{ matrix.component }} ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [haproxy, keepalived]
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve pinned source
+        id: source
+        env:
+          COMPONENT: ${{ matrix.component }}
+          ARCH: ${{ matrix.arch }}
+        run: go run ./hack/ha-image-source "${COMPONENT}" "${ARCH}" >>"${GITHUB_OUTPUT}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        env:
+          COMPONENT: ${{ matrix.component }}
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.source.outputs.version }}
+          SOURCE_URL: ${{ steps.source.outputs.url }}
+          SOURCE_SHA256: ${{ steps.source.outputs.sha256 }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          mkdir -p dist/ha-images
+          image="ghcr.io/${OWNER,,}/kube-do-${COMPONENT}:${VERSION}-${ARCH}"
+          docker buildx build \
+            --file build/ha/Dockerfile \
+            --platform "linux/${ARCH}" \
+            --provenance=false \
+            --sbom=false \
+            --build-arg BASE_IMAGE=almalinux:9 \
+            --build-arg COMPONENT="${COMPONENT}" \
+            --build-arg VERSION="${VERSION}" \
+            --build-arg SOURCE_URL="${SOURCE_URL}" \
+            --build-arg SOURCE_SHA256="${SOURCE_SHA256}" \
+            --tag "${image}" \
+            --push \
+            .
+          media_type=$(docker buildx imagetools inspect "${image}" --format '{{json .Manifest.MediaType}}' | tr -d '"')
+          case "${media_type}" in
+            application/vnd.oci.image.manifest.v1+json|application/vnd.docker.distribution.manifest.v2+json) ;;
+            *) echo "expected a single-platform image manifest, got ${media_type}" >&2; exit 1 ;;
+          esac
+          digest=$(docker buildx imagetools inspect "${image}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          case "${COMPONENT}" in
+            haproxy) docker run --rm --pull always --platform "linux/${ARCH}" "${image}@${digest}" /usr/local/sbin/haproxy -vv >/dev/null ;;
+            keepalived) docker run --rm --pull always --platform "linux/${ARCH}" "${image}@${digest}" /usr/local/sbin/keepalived --version >/dev/null ;;
+          esac
+          echo "${image}@${digest}" >"dist/ha-images/${COMPONENT}-${ARCH}.txt"
+          echo "image=${image}" >>"${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >>"${GITHUB_OUTPUT}"
+          echo "| ${COMPONENT} | ${ARCH} | ${VERSION} | ${image} | ${digest} |" >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload digest record
+        uses: actions/upload-artifact@v4
+        with:
+          name: ha-image-${{ matrix.component }}-${{ matrix.arch }}
+          path: dist/ha-images/${{ matrix.component }}-${{ matrix.arch }}.txt
+
+  summary:
+    name: Publish digest list
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download digest records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ha-image-*
+          path: dist/ha-images
+          merge-multiple: true
+
+      - name: Write digest list
+        run: |
+          sort dist/ha-images/*.txt > ha-images.txt
+          cat ha-images.txt
+          {
+            echo '### HA image digests'
+            echo '```'
+            cat ha-images.txt
+            echo '```'
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload digest list
+        uses: actions/upload-artifact@v4
+        with:
+          name: ha-image-digests
+          path: ha-images.txt
+

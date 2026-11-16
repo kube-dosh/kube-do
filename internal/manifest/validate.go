@@ -9,6 +9,7 @@ import (
 
 var (
 	sha256Re     = regexp.MustCompile(`^[a-f0-9]{64}$`)
+	digestRe     = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 	versionRe    = regexp.MustCompile(`^v\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$`)
 	archRe       = regexp.MustCompile(`^[a-z0-9]+$`)
 	buildNameRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -223,12 +224,29 @@ func (m *Manifest) Validate() error {
 		} else {
 			targetOwners[img.Target] = prefix
 		}
-		if !binaryNameRe.MatchString(img.Binary) {
-			add("%s: binary must be a safe binary name, got %q", prefix, img.Binary)
-		} else if binary, ok := installerBinaries[platformKey][img.Binary]; !ok {
-			add("%s: binary %q is not an Installer binary for %s", prefix, img.Binary, platformKey)
-		} else if img.Version != binary.Version {
-			add("%s: version %q differs from Installer binary %q version %q", prefix, img.Version, img.Binary, binary.Version)
+		if img.IsPrebuilt() {
+			if img.Binary != "" {
+				add("%s: source and binary are mutually exclusive", prefix)
+			}
+			if err := validateImageRef(img.Source, true); err != nil {
+				add("%s: source: %v", prefix, err)
+			} else if tag := imageTag(img.Source); tag != img.Version && !strings.HasPrefix(tag, img.Version+"-") {
+				add("%s: source tag %q must equal version %q or start with %q", prefix, tag, img.Version, img.Version+"-")
+			}
+			if !digestRe.MatchString(img.Digest) {
+				add("%s: digest must be a pinned sha256 digest", prefix)
+			}
+		} else {
+			if !binaryNameRe.MatchString(img.Binary) {
+				add("%s: binary must be a safe binary name, got %q", prefix, img.Binary)
+			} else if binary, ok := installerBinaries[platformKey][img.Binary]; !ok {
+				add("%s: binary %q is not an Installer binary for %s", prefix, img.Binary, platformKey)
+			} else if img.Version != binary.Version {
+				add("%s: version %q differs from Installer binary %q version %q", prefix, img.Version, img.Binary, binary.Version)
+			}
+			if img.Digest != "" {
+				add("%s: digest is only valid with a prebuilt source", prefix)
+			}
 		}
 		key := img.Name + "/" + platformKey
 		if seenInstallerImages[key] {

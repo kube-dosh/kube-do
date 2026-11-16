@@ -1,0 +1,25 @@
+---
+# Test-only overrides for slow QEMU TCG guests. These values are injected with
+# --extra-vars and must never become production defaults.
+kube_do_kubeadm_control_plane_health_timeout: 45m
+kube_do_kubeadm_etcd_api_timeout: 30m
+kube_do_kubeadm_kubelet_health_timeout: 45m
+kube_do_kubeadm_kubernetes_api_timeout: 30m
+kube_do_kubeadm_controller_manager_leader_elect_lease_duration: 10m
+kube_do_kubeadm_controller_manager_leader_elect_renew_deadline: 8m
+kube_do_kubeadm_controller_manager_leader_elect_retry_period: 30s
+kube_do_kubeadm_scheduler_leader_elect_lease_duration: 5m
+kube_do_kubeadm_scheduler_leader_elect_renew_deadline: 4m
+kube_do_kubeadm_scheduler_leader_elect_retry_period: 30s
+kube_do_cilium_api_request_timeout: 60s
+kube_do_cilium_api_ready_retries: 360
+kube_do_cilium_api_ready_delay: 10
+kube_do_cilium_uninstall_timeout: 30m
+kube_do_cilium_release_cleanup_retries: 360
+kube_do_cilium_release_cleanup_delay: 10
+kube_do_cilium_namespace_cleanup_retries: 360
+kube_do_cilium_namespace_cleanup_delay: 10
+kube_do_cilium_install_timeout: 90m
+kube_do_cilium_install_retries: 4
+kube_do_cilium_install_retry_delay: 30
+kube_do_cilium_rollout_timeout: 60m

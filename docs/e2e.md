@@ -46,6 +46,7 @@ KUBE_DO_E2E_CONFIG=/path/to/cluster.yaml \
 | `KUBE_DO_E2E_CONFIG` | 必填 | 已安装集群的 `ClusterConfig` |
 | `KUBE_DO_E2E_ADDR` | `127.0.0.1:18090` | 临时 daemon 监听地址 |
 | `KUBE_DO_E2E_WORK_DIR` | 自动创建 | 状态、缓存、日志和构建产物目录 |
+| `KUBE_DO_E2E_BIN` | 自动构建 | 指定已有 `kube-do` 可执行文件时跳过 Go 构建，也不再要求安装 Go |
 | `KUBE_DO_E2E_KEEP` | `0` | 设为 `1` 时保留工作目录 |
 | `KUBE_DO_E2E_RUN_OPS` | `1` | 设为 `0` 时只验证注册、鉴权和错误路径 |
 | `KUBE_DO_E2E_REQUIRE_CONFLICT` | `1` | 要求同集群并发任务返回 `409` |

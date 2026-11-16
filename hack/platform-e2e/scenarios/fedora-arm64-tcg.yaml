@@ -1,0 +1,96 @@
+---
+name: fedora-arm64-tcg
+description: Fedora 44 arm64 under QEMU TCG for functional pre-validation only.
+os: fedora
+osInfo: linux2024
+version: "44"
+arch: arm64
+acceleration: tcg
+firmware: uefi
+image:
+  url: https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/aarch64/images/Fedora-Cloud-Base-Generic-44-1.7.aarch64.qcow2
+  sha256: 55c60a3b80d3616a08705afd0459e75fe9f03c54aba7a46e4002a41a72fa0d5b
+network:
+  name: kubedo-e2e-fedora
+  bridge: virbr123
+  cidr: 192.168.123.0/24
+  gateway: 192.168.123.1
+  dns:
+    - 1.1.1.1
+proxy:
+  host: http://127.0.0.1:1080
+  guestPort: 1080
+cluster:
+  name: platform-fedora-arm64-tcg
+  build: v1.36.5-kube-do.1
+  vip: 192.168.123.50
+  apiPort: 16443
+  vrrp:
+    routerId: 123
+    password: fedora
+installer:
+  name: installer
+  address: 192.168.123.10
+  vcpus: 8
+  memoryMiB: 8192
+  diskGiB: 40
+controlPlane:
+  - name: cp-1
+    address: 192.168.123.100
+    vcpus: 8
+    memoryMiB: 8192
+    diskGiB: 24
+  - name: cp-2
+    address: 192.168.123.101
+    vcpus: 8
+    memoryMiB: 8192
+    diskGiB: 24
+  - name: cp-3
+    address: 192.168.123.103
+    vcpus: 8
+    memoryMiB: 8192
+    diskGiB: 24
+workers:
+  - name: worker-1
+    address: 192.168.123.200
+    vcpus: 8
+    memoryMiB: 8192
+    diskGiB: 24
+extraVars:
+  kube_do_systemctl_list_retries: 12
+  kube_do_systemctl_list_delay: 10
+  kube_do_bootstrap_join_retries: 20
+  kube_do_bootstrap_join_delay: 30
+  kube_do_kubeadm_control_plane_health_timeout: 45m
+  kube_do_kubeadm_etcd_api_timeout: 30m
+  kube_do_kubeadm_kubelet_health_timeout: 45m
+  kube_do_kubeadm_kubernetes_api_timeout: 30m
+  kube_do_kubeadm_controller_manager_leader_elect_lease_duration: 10m
+  kube_do_kubeadm_controller_manager_leader_elect_renew_deadline: 8m
+  kube_do_kubeadm_controller_manager_leader_elect_retry_period: 30s
+  kube_do_kubeadm_scheduler_leader_elect_lease_duration: 5m
+  kube_do_kubeadm_scheduler_leader_elect_renew_deadline: 4m
+  kube_do_kubeadm_scheduler_leader_elect_retry_period: 30s
+  kube_do_cilium_api_request_timeout: 60s
+  kube_do_cilium_api_ready_retries: 360
+  kube_do_cilium_api_ready_delay: 10
+  kube_do_cilium_uninstall_timeout: 30m
+  kube_do_cilium_release_cleanup_retries: 360
+  kube_do_cilium_release_cleanup_delay: 10
+  kube_do_cilium_namespace_cleanup_retries: 360
+  kube_do_cilium_namespace_cleanup_delay: 10
+  kube_do_cilium_install_timeout: 90m
+  kube_do_cilium_install_retries: 4
+  kube_do_cilium_install_retry_delay: 30
+  kube_do_cilium_rollout_timeout: 60m
+  kube_do_node_ready_timeout: 90m
+  kube_do_cilium_operator_rollout_timeout: 60m
+  kube_do_coredns_rollout_timeout: 60m
+  kube_do_hubble_rollout_timeout: 60m
+  kube_do_add_worker_ready_timeout: 60m
+  kube_do_ha_container_ready_retries: 180
+  kube_do_ha_container_ready_delay: 10
+  kube_do_ha_vip_ready_retries: 180
+  kube_do_ha_vip_ready_delay: 10
+kernelArgs:
+  - systemd.default_device_timeout_sec=300

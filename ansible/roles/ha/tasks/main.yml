@@ -4,8 +4,6 @@
     that:
       - binaries | selectattr('name', 'equalto', 'haproxy') | list | length == 0
       - binaries | selectattr('name', 'equalto', 'keepalived') | list | length == 0
-      - installer_binaries | selectattr('name', 'equalto', 'haproxy') | list | length == 1
-      - installer_binaries | selectattr('name', 'equalto', 'keepalived') | list | length == 1
       - installer_images | selectattr('name', 'equalto', 'haproxy') | list | length == 1
       - installer_images | selectattr('name', 'equalto', 'keepalived') | list | length == 1
     fail_msg: "The Build must provide HAProxy and keepalived as Installer images, not node binaries"
@@ -14,6 +12,13 @@
   ansible.builtin.set_fact:
     kube_do_haproxy_image: "{{ installer_images | selectattr('name', 'equalto', 'haproxy') | first }}"
     kube_do_keepalived_image: "{{ installer_images | selectattr('name', 'equalto', 'keepalived') | first }}"
+
+- name: Assert that local-build HA images have Installer binaries
+  ansible.builtin.assert:
+    that:
+      - kube_do_haproxy_image.source is defined or installer_binaries | selectattr('name', 'equalto', 'haproxy') | list | length == 1
+      - kube_do_keepalived_image.source is defined or installer_binaries | selectattr('name', 'equalto', 'keepalived') | list | length == 1
+    fail_msg: "The Build must provide an Installer binary for each HA image that does not use a prebuilt source"
 
 - name: Assert that ctr is available for the HA containers
   ansible.builtin.command: /usr/local/bin/ctr --version
@@ -151,8 +156,8 @@
   register: kube_do_haproxy_task
   changed_when: false
   until: kube_do_haproxy_task.rc == 0
-  retries: 20
-  delay: 2
+  retries: "{{ kube_do_ha_container_ready_retries }}"
+  delay: "{{ kube_do_ha_container_ready_delay }}"
 
 - name: Install the keepalived configuration
   ansible.builtin.template:
@@ -192,15 +197,15 @@
   register: kube_do_keepalived_task
   changed_when: false
   until: kube_do_keepalived_task.rc == 0
-  retries: 20
-  delay: 2
+  retries: "{{ kube_do_ha_container_ready_retries }}"
+  delay: "{{ kube_do_ha_container_ready_delay }}"
 
 - name: Wait for the VIP to appear on the elected node
   ansible.builtin.command: "ip -o -4 addr show dev {{ kube_do_vip_interface }}"
   register: kube_do_vip_state
   changed_when: false
   until: control_plane_vip in kube_do_vip_state.stdout
-  retries: 20
-  delay: 2
+  retries: "{{ kube_do_ha_vip_ready_retries }}"
+  delay: "{{ kube_do_ha_vip_ready_delay }}"
   when: inventory_hostname == groups['control_plane'][0]
 

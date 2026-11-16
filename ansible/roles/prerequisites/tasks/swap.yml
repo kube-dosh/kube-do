@@ -4,12 +4,16 @@
     argv:
       - systemctl
       - list-unit-files
+      - --root=/
       - --type=swap
       - --no-legend
       - --no-pager
   register: kube_do_systemd_swap_unit_files
   changed_when: false
   check_mode: false
+  retries: "{{ kube_do_systemctl_list_retries }}"
+  delay: "{{ kube_do_systemctl_list_delay }}"
+  until: kube_do_systemd_swap_unit_files.rc in [0, 1]
   failed_when: kube_do_systemd_swap_unit_files.rc not in [0, 1]
 
 - name: List systemd service unit files
@@ -17,12 +21,16 @@
     argv:
       - systemctl
       - list-unit-files
+      - --root=/
       - --type=service
       - --no-legend
       - --no-pager
   register: kube_do_systemd_service_unit_files
   changed_when: false
   check_mode: false
+  retries: "{{ kube_do_systemctl_list_retries }}"
+  delay: "{{ kube_do_systemctl_list_delay }}"
+  until: kube_do_systemd_service_unit_files.rc == 0
 
 - name: List loaded zram services
   ansible.builtin.command:
@@ -39,6 +47,9 @@
   register: kube_do_loaded_zram_services
   changed_when: false
   check_mode: false
+  retries: "{{ kube_do_systemctl_list_retries }}"
+  delay: "{{ kube_do_systemctl_list_delay }}"
+  until: kube_do_loaded_zram_services.rc == 0
 
 - name: List loaded systemd swap units
   ansible.builtin.command:
@@ -53,6 +64,9 @@
   register: kube_do_loaded_systemd_swap_units
   changed_when: false
   check_mode: false
+  retries: "{{ kube_do_systemctl_list_retries }}"
+  delay: "{{ kube_do_systemctl_list_delay }}"
+  until: kube_do_loaded_systemd_swap_units.rc == 0
 
 - name: Record swap and zram unit names
   ansible.builtin.set_fact:
@@ -107,6 +121,7 @@
     name: "{{ item }}"
     state: stopped
   loop: "{{ kube_do_loaded_swap_unit_names }}"
+  failed_when: false
 
 - name: Disable active swap
   ansible.builtin.command: swapoff -a
@@ -118,6 +133,7 @@
     name: "{{ item }}"
     state: stopped
   loop: "{{ kube_do_loaded_zram_service_names }}"
+  failed_when: false
 
 - name: Disable enabled zram services
   ansible.builtin.systemd:
@@ -201,6 +217,7 @@
     argv:
       - systemctl
       - list-unit-files
+      - --root=/
       - --type=swap
       - --no-legend
       - --no-pager
@@ -244,6 +261,7 @@
     argv:
       - systemctl
       - list-unit-files
+      - --root=/
       - --type=service
       - --no-legend
       - --no-pager

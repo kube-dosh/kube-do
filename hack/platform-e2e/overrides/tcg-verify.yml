@@ -1,0 +1,8 @@
+---
+# Test-only overrides for slow QEMU TCG guests. These values are injected with
+# --extra-vars and must never become production defaults.
+kube_do_node_ready_timeout: 90m
+kube_do_cilium_operator_rollout_timeout: 60m
+kube_do_coredns_rollout_timeout: 60m
+kube_do_hubble_rollout_timeout: 60m
+kube_do_add_worker_ready_timeout: 60m

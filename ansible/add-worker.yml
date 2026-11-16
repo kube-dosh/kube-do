@@ -38,6 +38,8 @@
   hosts: control_plane[0]
   gather_facts: false
   any_errors_fatal: true
+  vars:
+    kube_do_add_worker_ready_timeout: 10m
   tasks:
     - name: Wait for new workers to become Ready
       ansible.builtin.command:
@@ -48,6 +50,6 @@
           - wait
           - --for=condition=Ready
           - "node/{{ item }}"
-          - --timeout=10m
+          - "--timeout={{ kube_do_add_worker_ready_timeout }}"
       loop: "{{ groups['new_workers'] }}"
       changed_when: false

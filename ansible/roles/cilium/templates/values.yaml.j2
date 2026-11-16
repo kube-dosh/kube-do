@@ -27,8 +27,7 @@ image:
 
 operator:
   image:
-    repository: {{ kube_do_operator_image.repository }}
-    tag: {{ kube_do_operator_image.tag }}
+    override: "{{ kube_do_operator_image.repository }}:{{ kube_do_operator_image.tag }}"
     useDigest: false
   replicas: 2
 

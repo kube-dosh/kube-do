@@ -91,6 +91,29 @@ func (m *Manifest) InstallerBinariesFor(os, arch string) []Binary {
 	return filterBinaries(m.Spec.Installer.Binaries, os, arch)
 }
 
+// RequiredInstallerBinariesFor returns Installer binaries that are actually
+// needed on this platform. A built binary backing only prebuilt Installer
+// images is a fallback and must not be compiled on the Installer Host.
+func (m *Manifest) RequiredInstallerBinariesFor(os, arch string) []Binary {
+	localBuilds := map[string]bool{}
+	prebuilt := map[string]bool{}
+	for _, img := range m.InstallerImagesFor(os, arch) {
+		if img.IsPrebuilt() {
+			prebuilt[img.Name] = true
+		} else {
+			localBuilds[img.Binary] = true
+		}
+	}
+	out := make([]Binary, 0, len(m.Spec.Installer.Binaries))
+	for _, b := range m.InstallerBinariesFor(os, arch) {
+		if b.IsBuilt() && prebuilt[b.Name] && !localBuilds[b.Name] {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
 // BinaryFor returns the named binary for one platform.
 func (m *Manifest) BinaryFor(name, os, arch string) (Binary, bool) {
 	binaries := make([]Binary, 0, len(m.Spec.Binaries)+len(m.Spec.Installer.Binaries))
@@ -122,8 +145,8 @@ type Registry struct {
 // Installer holds Artifacts needed only on the Installer Host.
 type Installer struct {
 	Binaries []Binary `yaml:"binaries"`
-	// Images are runtime images assembled from Installer binaries. They are
-	// pushed to the private Registry and pulled by cluster nodes.
+	// Images are prebuilt runtime images or images assembled from Installer
+	// binaries. They are pushed to the private Registry and pulled by nodes.
 	Images []InstallerImage `yaml:"images,omitempty"`
 }
 
@@ -176,8 +199,8 @@ type Image struct {
 	Target string `yaml:"target"`
 }
 
-// InstallerImage is a container image assembled on the Installer Host from one
-// of its pinned binaries and that binary's runtime libraries.
+// InstallerImage is a container image copied to the private Registry. Source
+// pins a prebuilt image; Binary selects the legacy local-build fallback.
 type InstallerImage struct {
 	Name    string `yaml:"name"`
 	Version string `yaml:"version"`
@@ -185,9 +208,18 @@ type InstallerImage struct {
 	Arch    string `yaml:"arch"`
 	// Target is a repository:tag path relative to <registry>/<namespace>.
 	Target string `yaml:"target"`
-	// Binary names the Installer Host binary copied into this image.
-	Binary string `yaml:"binary"`
+	// Source is a prebuilt OCI image reference mirrored to Target.
+	Source string `yaml:"source,omitempty"`
+	// Digest pins Source to an immutable sha256 digest.
+	Digest string `yaml:"digest,omitempty"`
+	// Binary names the Installer Host binary copied into this image when Source
+	// is empty.
+	Binary string `yaml:"binary,omitempty"`
 }
+
+// IsPrebuilt reports whether this image is copied from a pinned OCI source
+// instead of being assembled from an Installer Host binary.
+func (i InstallerImage) IsPrebuilt() bool { return i.Source != "" }
 
 // Parse decodes and validates a Resource Manifest.
 func Parse(data []byte) (*Manifest, error) {

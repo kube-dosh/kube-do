@@ -238,6 +238,53 @@ func TestBuildBinary(t *testing.T) {
 	}
 }
 
+func TestRunSkipsUnusedBuiltBinaryForPrebuiltInstallerImage(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("fixture targets linux/amd64")
+	}
+	payload := []byte("registry")
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	registry := manifest.Binary{
+		Name: "registry", Version: "3.1.2", OS: "linux", Arch: "amd64",
+		URL: srv.URL + "/registry", SHA256: sha256Hex(payload),
+	}
+	haproxy := manifest.Binary{
+		Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64",
+		URL: srv.URL + "/haproxy.tar.gz", Archive: manifest.ArchiveTarGz,
+		Build: manifest.BuildHAProxy, SourceSHA256: strings.Repeat("a", 64),
+	}
+	m := testManifest(nil, nil)
+	m.Spec.Installer.Binaries = []manifest.Binary{registry, haproxy}
+	m.Spec.Installer.Images = []manifest.InstallerImage{
+		{Name: "registry-runtime", Version: "3.1.2", OS: "linux", Arch: "amd64", Target: "registry:3.1.2-amd64", Binary: "registry"},
+		{Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64", Target: "haproxy:3.2.26-amd64", Source: "ghcr.io/example/haproxy:3.2.26-amd64", Digest: "sha256:" + strings.Repeat("b", 64)},
+	}
+	buildCalls := 0
+	runner := func(_ context.Context, dir, name string, _ []string, _, _ io.Writer) error {
+		buildCalls++
+		return os.WriteFile(filepath.Join(dir, "haproxy"), []byte("unexpected"), 0o755)
+	}
+	sum, err := Run(context.Background(), Options{
+		CacheDir: t.TempDir(), RegistryAddress: "reg:5000", Manifest: m,
+		BinariesOnly: true, Runner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Downloaded != 1 || buildCalls != 0 {
+		t.Fatalf("summary = %+v, buildCalls = %d", sum, buildCalls)
+	}
+	if len(paths) != 1 || paths[0] != "/registry" {
+		t.Fatalf("fetched paths = %v", paths)
+	}
+}
+
 func TestMirrorImage(t *testing.T) {
 	src := httptest.NewServer(registry.New())
 	defer src.Close()
@@ -283,6 +330,16 @@ func TestMirrorImage(t *testing.T) {
 	}
 	if srcDesc.Digest != dstDesc.Digest {
 		t.Fatalf("digest mismatch: %s != %s", srcDesc.Digest, dstDesc.Digest)
+	}
+}
+
+func TestBuildTransportSetsResponseHeaderTimeout(t *testing.T) {
+	transport, err := buildTransport("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport.ResponseHeaderTimeout == 0 {
+		t.Fatal("registry transport must bound the time spent waiting for response headers")
 	}
 }
 
@@ -336,6 +393,140 @@ func TestRunBuildsInstallerImage(t *testing.T) {
 	}
 	if _, err := remote.Get(dstRef); err != nil {
 		t.Fatalf("generated image not found: %v", err)
+	}
+}
+
+func TestRunMirrorsPrebuiltInstallerImage(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("fixture targets linux/amd64")
+	}
+	srcSrv := httptest.NewServer(registry.New())
+	defer srcSrv.Close()
+	dstSrv := httptest.NewServer(registry.New())
+	defer dstSrv.Close()
+	srcHost := strings.TrimPrefix(srcSrv.URL, "http://")
+	dstHost := strings.TrimPrefix(dstSrv.URL, "http://")
+
+	srcRef, err := name.ParseReference(srcHost+"/kube-do/haproxy:3.2.26-amd64", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(srcRef, image); err != nil {
+		t.Fatalf("seed source registry: %v", err)
+	}
+	srcDesc, err := remote.Get(srcRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := testManifest(nil, nil)
+	m.Spec.Installer.Images = []manifest.InstallerImage{{
+		Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64",
+		Source: srcRef.String(), Digest: srcDesc.Digest.String(),
+		Target: "haproxy:3.2.26-amd64",
+	}}
+	sum, err := Run(context.Background(), Options{
+		CacheDir: t.TempDir(), RegistryAddress: dstHost, Manifest: m, ImagesOnly: true, Insecure: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Mirrored != 1 || sum.Built != 0 {
+		t.Fatalf("summary = %+v", sum)
+	}
+
+	dstRef, err := name.ParseReference(dstHost+"/kube-do/haproxy:3.2.26-amd64", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstDesc, err := remote.Get(dstRef)
+	if err != nil {
+		t.Fatalf("mirrored image not found: %v", err)
+	}
+	if dstDesc.Digest != srcDesc.Digest {
+		t.Fatalf("digest mismatch: %s != %s", dstDesc.Digest, srcDesc.Digest)
+	}
+}
+
+func TestRunRejectsPrebuiltInstallerImageDigestMismatch(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("fixture targets linux/amd64")
+	}
+	srcSrv := httptest.NewServer(registry.New())
+	defer srcSrv.Close()
+	dstSrv := httptest.NewServer(registry.New())
+	defer dstSrv.Close()
+	srcHost := strings.TrimPrefix(srcSrv.URL, "http://")
+	dstHost := strings.TrimPrefix(dstSrv.URL, "http://")
+
+	srcRef, err := name.ParseReference(srcHost+"/kube-do/haproxy:3.2.26-amd64", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(srcRef, image); err != nil {
+		t.Fatalf("seed source registry: %v", err)
+	}
+
+	m := testManifest(nil, nil)
+	m.Spec.Installer.Images = []manifest.InstallerImage{{
+		Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64",
+		Source: srcRef.String(), Digest: "sha256:" + strings.Repeat("0", 64),
+		Target: "haproxy:3.2.26-amd64",
+	}}
+	_, err = Run(context.Background(), Options{
+		CacheDir: t.TempDir(), RegistryAddress: dstHost, Manifest: m, ImagesOnly: true, Insecure: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not match pinned digest") {
+		t.Fatalf("expected digest mismatch, got %v", err)
+	}
+}
+
+func TestRunRejectsPrebuiltInstallerImageIndex(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("fixture targets linux/amd64")
+	}
+	srcSrv := httptest.NewServer(registry.New())
+	defer srcSrv.Close()
+	dstSrv := httptest.NewServer(registry.New())
+	defer dstSrv.Close()
+	srcHost := strings.TrimPrefix(srcSrv.URL, "http://")
+	dstHost := strings.TrimPrefix(dstSrv.URL, "http://")
+
+	srcRef, err := name.ParseReference(srcHost+"/kube-do/haproxy:3.2.26-amd64", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := random.Index(1024, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.WriteIndex(srcRef, index); err != nil {
+		t.Fatalf("seed source registry: %v", err)
+	}
+	desc, err := remote.Get(srcRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := testManifest(nil, nil)
+	m.Spec.Installer.Images = []manifest.InstallerImage{{
+		Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64",
+		Source: srcRef.String(), Digest: desc.Digest.String(),
+		Target: "haproxy:3.2.26-amd64",
+	}}
+	_, err = Run(context.Background(), Options{
+		CacheDir: t.TempDir(), RegistryAddress: dstHost, Manifest: m, ImagesOnly: true, Insecure: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "single-platform manifest") {
+		t.Fatalf("expected image index rejection, got %v", err)
 	}
 }
 

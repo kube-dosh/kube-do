@@ -87,7 +87,7 @@ func checkPlatform(cfg *cluster.Config, m *manifest.Manifest) Result {
 		return Result{Name: "platform", Status: StatusFail, Detail: fmt.Sprintf("build %q does not provide %s/%s", m.Metadata.Name, os, arch)}
 	}
 	if runtime.GOOS != os || runtime.GOARCH != arch {
-		return Result{Name: "platform", Status: StatusFail, Detail: fmt.Sprintf("target is %s/%s but Installer Host is %s/%s; built HA artifacts must match the target", os, arch, runtime.GOOS, runtime.GOARCH)}
+		return Result{Name: "platform", Status: StatusFail, Detail: fmt.Sprintf("target is %s/%s but Installer Host is %s/%s; Registry and legacy HA fallback artifacts require matching architectures", os, arch, runtime.GOOS, runtime.GOARCH)}
 	}
 	return Result{Name: "platform", Status: StatusOK, Detail: fmt.Sprintf("%s/%s (%s)", os, arch, cfg.Platform.OSFamily)}
 }
@@ -104,7 +104,7 @@ func checkPlatforms(m *manifest.Manifest) Result {
 func checkArtifacts(cacheDir string, m *manifest.Manifest, platformOS, arch string) Result {
 	binaries := make([]manifest.Binary, 0)
 	binaries = append(binaries, m.BinariesFor(platformOS, arch)...)
-	binaries = append(binaries, m.InstallerBinariesFor(platformOS, arch)...)
+	binaries = append(binaries, m.RequiredInstallerBinariesFor(platformOS, arch)...)
 	if len(binaries) == 0 {
 		return Result{Name: "artifacts", Status: StatusFail, Detail: fmt.Sprintf("build %q has no binaries for %s/%s", m.Metadata.Name, platformOS, arch)}
 	}

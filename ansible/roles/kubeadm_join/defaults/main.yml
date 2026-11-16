@@ -1,0 +1,3 @@
+---
+kube_do_bootstrap_join_retries: 3
+kube_do_bootstrap_join_delay: 10

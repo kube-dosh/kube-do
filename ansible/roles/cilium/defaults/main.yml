@@ -1,0 +1,13 @@
+---
+kube_do_cilium_api_request_timeout: 10s
+kube_do_cilium_api_ready_retries: 120
+kube_do_cilium_api_ready_delay: 5
+kube_do_cilium_uninstall_timeout: 5m
+kube_do_cilium_release_cleanup_retries: 120
+kube_do_cilium_release_cleanup_delay: 5
+kube_do_cilium_namespace_cleanup_retries: 120
+kube_do_cilium_namespace_cleanup_delay: 5
+kube_do_cilium_install_timeout: 15m
+kube_do_cilium_install_retries: 0
+kube_do_cilium_install_retry_delay: 10
+kube_do_cilium_rollout_timeout: 10m

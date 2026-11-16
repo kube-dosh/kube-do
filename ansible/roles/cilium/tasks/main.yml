@@ -61,13 +61,13 @@
       - /usr/local/bin/kubectl
       - --kubeconfig
       - /etc/kubernetes/admin.conf
-      - --request-timeout=10s
+      - "--request-timeout={{ kube_do_cilium_api_request_timeout }}"
       - get
       - --raw=/readyz
   register: kube_do_cilium_api_ready
   changed_when: false
-  retries: 120
-  delay: 5
+  retries: "{{ kube_do_cilium_api_ready_retries }}"
+  delay: "{{ kube_do_cilium_api_ready_delay }}"
   until: kube_do_cilium_api_ready.rc == 0
 
 - name: Inspect the existing Cilium Helm release
@@ -112,7 +112,7 @@
       - --kubeconfig
       - /etc/kubernetes/admin.conf
       - --timeout
-      - 5m
+      - "{{ kube_do_cilium_uninstall_timeout }}"
   when:
     - kube_do_cilium_release.rc == 0
     - kube_do_cilium_release_status not in ['deployed', 'uninstalled', 'uninstalling']
@@ -130,8 +130,8 @@
   register: kube_do_cilium_release_wait
   changed_when: false
   failed_when: false
-  retries: 120
-  delay: 5
+  retries: "{{ kube_do_cilium_release_cleanup_retries }}"
+  delay: "{{ kube_do_cilium_release_cleanup_delay }}"
   until: kube_do_cilium_release_wait.rc != 0
   when:
     - kube_do_cilium_release.rc == 0
@@ -229,8 +229,8 @@
   register: kube_do_cilium_namespace_wait
   changed_when: false
   failed_when: false
-  retries: 120
-  delay: 5
+  retries: "{{ kube_do_cilium_namespace_cleanup_retries }}"
+  delay: "{{ kube_do_cilium_namespace_cleanup_delay }}"
   until: kube_do_cilium_namespace_wait.rc != 0
   when: kube_do_cilium_namespace_cleanup
 
@@ -251,7 +251,11 @@
       - --atomic
       - --wait
       - --timeout
-      - 15m
+      - "{{ kube_do_cilium_install_timeout }}"
+  register: kube_do_cilium_install
+  retries: "{{ kube_do_cilium_install_retries }}"
+  delay: "{{ kube_do_cilium_install_retry_delay }}"
+  until: kube_do_cilium_install.rc == 0
 
 - name: Wait for the Cilium DaemonSet
   ansible.builtin.command:
@@ -264,6 +268,6 @@
       - rollout
       - status
       - daemonset/cilium
-      - --timeout=10m
+      - "--timeout={{ kube_do_cilium_rollout_timeout }}"
   changed_when: false
 

@@ -134,6 +134,26 @@ func TestRunBumpsHAProxyInstallerImages(t *testing.T) {
 	}
 }
 
+func TestRunRejectsBumpingPrebuiltInstallerImage(t *testing.T) {
+	m := baseManifest(t)
+	for i := range m.Spec.Installer.Images {
+		img := &m.Spec.Installer.Images[i]
+		if img.Name != "haproxy" {
+			continue
+		}
+		img.Source = "ghcr.io/example/haproxy:" + img.Version + "-" + img.Arch
+		img.Digest = "sha256:" + testSHA
+		img.Binary = ""
+	}
+	_, err := Run(context.Background(), Options{
+		Base:     m,
+		Versions: Versions{HAProxy: "3.2.27"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "prebuilt Installer images") {
+		t.Fatalf("expected prebuilt image bump error, got %v", err)
+	}
+}
+
 func installerImageFor(images []manifest.InstallerImage, name string) (manifest.InstallerImage, bool) {
 	for _, image := range images {
 		if image.Name == name {

@@ -130,6 +130,10 @@ func DiscoverLibraries(binaryPath string) ([]string, error) {
 		"/usr/lib64/libgcc_s.so.1",
 		"/lib/libgcc_s.so.1",
 		"/usr/lib/libgcc_s.so.1",
+		"/lib/x86_64-linux-gnu/libgcc_s.so.1",
+		"/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+		"/lib/aarch64-linux-gnu/libgcc_s.so.1",
+		"/usr/lib/aarch64-linux-gnu/libgcc_s.so.1",
 	)
 	return libraries, nil
 }

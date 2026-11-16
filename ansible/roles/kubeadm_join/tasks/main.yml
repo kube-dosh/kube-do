@@ -35,6 +35,12 @@
   when:
     - not kube_do_kubelet_conf.stat.exists
     - join_control_plane | bool
+  register: kube_do_control_plane_join
+  retries: "{{ kube_do_bootstrap_join_retries }}"
+  delay: "{{ kube_do_bootstrap_join_delay }}"
+  until: >-
+    kube_do_control_plane_join.rc == 0 or
+    'could not find a JWS signature' not in (kube_do_control_plane_join.stderr | default(''))
 
 - name: Join a worker node
   ansible.builtin.command:
@@ -48,6 +54,12 @@
   when:
     - not kube_do_kubelet_conf.stat.exists
     - not join_control_plane | bool
+  register: kube_do_worker_join
+  retries: "{{ kube_do_bootstrap_join_retries }}"
+  delay: "{{ kube_do_bootstrap_join_delay }}"
+  until: >-
+    kube_do_worker_join.rc == 0 or
+    'could not find a JWS signature' not in (kube_do_worker_join.stderr | default(''))
 
 - name: Ensure kubelet is running after join
   ansible.builtin.systemd:

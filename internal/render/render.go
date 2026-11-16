@@ -140,7 +140,9 @@ type installerImageVars struct {
 	Target     string `yaml:"target"`
 	Repository string `yaml:"repository"`
 	Tag        string `yaml:"tag"`
-	Binary     string `yaml:"binary"`
+	Source     string `yaml:"source,omitempty"`
+	Digest     string `yaml:"digest,omitempty"`
+	Binary     string `yaml:"binary,omitempty"`
 }
 
 type nodeVars struct {
@@ -257,6 +259,8 @@ func buildVars(cfg *cluster.Config, m *manifest.Manifest) (*vars, error) {
 			Target:     ref,
 			Repository: repository,
 			Tag:        tag,
+			Source:     img.Source,
+			Digest:     img.Digest,
 			Binary:     img.Binary,
 		})
 	}

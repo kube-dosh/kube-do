@@ -41,7 +41,7 @@ kube-do 适用于隔离数据中心、合规环境、边缘站点，以及强调
 
 kube-do 将安装过程分为两层：
 
-- **资源层：** `kube-do` CLI 下载并校验资源，构建 HAProxy 与 keepalived 镜像，部署或复用私有 OCI Registry，搬运镜像，通过 HTTP 提供二进制下载，并渲染 Ansible 配置。
+- **资源层：** `kube-do` CLI 下载并校验资源；当 Build 提供预构建来源时，搬运固定 digest 的 HAProxy 与 keepalived 运行时镜像；部署或复用私有 OCI Registry，搬运镜像，通过 HTTP 提供二进制下载，并渲染 Ansible 配置。旧 Build 或离线场景仍可回退到本机组装 HA 镜像。
 - **集群层：** Ansible 配置主机、安装 containerd、配置控制平面 VIP 与 API 负载均衡、执行 `kubeadm`、安装 Cilium，并验证集群状态。
 
 最终形成的可重复流程中，只有安装机（Installer Host）需要访问上游网络；所有目标节点只从安装机获取固定版本的资源。
@@ -114,7 +114,7 @@ flowchart LR
 | `rhel` | RHEL 系 9、Rocky Linux 9、Fedora 44 | 仅当安装机与所有目标节点均为 Fedora 44 时支持 Fedora 44。 |
 | `debian` | Debian 12/13、Ubuntu 22.04/24.04 | Debian 家族覆盖 SELinux、防火墙、Swap 与包管理器差异。 |
 
-支持的 CPU 架构为 `amd64`（`x86_64`）与 `arm64`（`aarch64`）。一个 Build 可以同时包含两种架构的资源，但安装机必须与目标集群架构一致，因为 HAProxy 与 keepalived 在安装机上原生构建。
+支持的 CPU 架构为 `amd64`（`x86_64`）与 `arm64`（`aarch64`）。一个 Build 可以同时包含两种架构的资源。安装机当前仍需与目标集群架构一致，因为 Registry 安装二进制和本地 HA 构建回退路径都是原生程序；HA 镜像工作流会分别构建 `amd64` 与 `arm64` 镜像。在首批 GHCR 镜像发布并在内嵌 Build 中固定 digest 之前，该 Build 仍使用本地回退路径。
 
 ### 端到端验证状态
 
@@ -122,8 +122,9 @@ flowchart LR
 | --- | --- |
 | Rocky Linux 9.8 / `amd64` | 已完成三控制平面 + 一 Worker 的离线端到端安装验证。 |
 | Debian 12 / `amd64` | 已完成离线端到端安装验证。 |
-| Fedora 44 / `amd64` | 已在三控制平面 + 五 Worker 的实验环境完成安装验证。 |
-| Debian 13、Ubuntu 22.04/24.04 | 代码、Ansible 分支与资源校验已支持，仍需端到端安装验证。 |
+| Fedora 44 / `amd64` | 已在一次性 libvirt 环境中完成三控制平面 + 一 Worker 的完整离线 E2E。 |
+| Debian 13 / `amd64` | 已在一次性 libvirt 环境中完成三控制平面 + 一 Worker 的完整离线 E2E。 |
+| Ubuntu 22.04/24.04 | 代码、Ansible 分支与资源校验已支持，仍需端到端安装验证。 |
 | 所有 `arm64` 目标 | 资源与构建路径已实现；完整集群安装与 HA 镜像运行仍需验证。 |
 
 详细范围与已知缺口见[验证状态](#验证状态)。
@@ -136,10 +137,10 @@ flowchart LR
 - 部署 Registry、准备缓存、运行 Download Server 和执行 Ansible 需要 root 或免密 sudo 权限。
 - 准备新 Build 时需要访问上游资源与镜像源。
 - `PATH` 中可调用 `ansible-playbook`。
-- 原生构建 HAProxy 与 keepalived 需要 `gcc`、`make`、`pkg-config` 与 OpenSSL 开发头文件。RHEL 系通常为 `openssl-devel`，Debian 系通常为 `libssl-dev`。
+- 默认的 digest 固定 HA 镜像路径不需要 C 工具链。离线回退路径仍需要 `gcc`、`make`、`pkg-config` 与 OpenSSL 开发头文件；RHEL 系通常为 `openssl-devel`，Debian 系通常为 `libssl-dev`。
 - 能通过 SSH 访问全部控制平面与 Worker 节点，推荐使用密钥认证。
 - 安装机与所有目标节点启用时间同步。kube-do 不配置 NTP。
-- 安装机的 C 运行库**不得新于**目标节点。HAProxy 与 keepalived 镜像包含构建机的动态库，ABI 不兼容时会出现 `GLIBC_x.y not found`。
+- 使用本地回退路径时，安装机的 C 运行库**不得新于**目标节点。预构建 HA 镜像基于受支持的基线构建，不依赖安装机的 glibc。
 
 从源码安装时要求 Go 1.27。发布版二进制使用 `CGO_ENABLED=0` 静态构建，安装机无需安装 Go。
 
@@ -183,7 +184,7 @@ kube-do check --config cluster.yaml
 
 `check` 会校验配置与内嵌 Resource Manifest。下载资源之前，它会将资源报告为缺失，但仍会检查所选 Build、平台和配置之间是否一致。
 
-### 3. 下载节点二进制并构建 HA 产物
+### 3. 下载节点二进制并准备 HA 输入
 
 ```bash
 sudo kube-do download \
@@ -192,7 +193,7 @@ sudo kube-do download \
   --cache-dir /var/cache/kube-do
 ```
 
-该步骤下载目标平台二进制，从固定源码构建 HAProxy 与 keepalived，并记录可复现的构建元数据。HA 二进制只作为 Installer 镜像的输入，不会直接分发到目标节点。
+该步骤下载目标平台二进制。若 Manifest 的 Installer 镜像使用 `source` 与 `digest`，这里不会编译 HAProxy 与 keepalived，也会跳过仅供预构建镜像使用、实际未被引用的回退二进制；镜像在后续步骤中搬运并校验 digest。旧的 `binary` 形式仍会从固定源码构建并记录可复现的构建元数据，保留用于离线恢复与开发。
 
 ### 4. 部署或复用私有 Registry
 
@@ -213,7 +214,7 @@ sudo kube-do download \
   --cache-dir /var/cache/kube-do
 ```
 
-节点镜像直接在两个 Registry 之间复制，不写入本地磁盘，并保留多架构 manifest index。HAProxy 与 keepalived 的 Installer 镜像由本机构建产物及其运行库组装而成。
+节点镜像直接在两个 Registry 之间复制，不写入本地磁盘，并保留多架构 manifest index。预构建 HAProxy 与 keepalived 镜像从固定的 `source` 引用复制，并在搬运前后校验 `digest`。仍使用 `binary` 回退形式的 Manifest 会在本机组装 Installer 镜像。
 
 ### 6. 提供资源并安装集群
 
@@ -353,7 +354,7 @@ Registry 不提供认证或 RBAC。任何能访问 `5000` 端口的主体都可�
 | --- | --- |
 | `kube-do version` | 输出版本、Commit 与构建时间 |
 | `kube-do check` | 校验 `cluster.yaml`、Resource Manifest、输入文件、缓存资源与构建元数据，可选探测 Registry |
-| `kube-do download` | 下载二进制、构建 HA 镜像并搬运节点镜像 |
+| `kube-do download` | 下载二进制、搬运预构建 HA 镜像或组装本地回退镜像，并搬运节点镜像 |
 | `kube-do registry` | 部署或复用私有 Registry |
 | `kube-do serve` | 通过 HTTP 提供缓存资源 |
 | `kube-do render` | 生成 Ansible Inventory 与 Group Variables |
@@ -393,7 +394,20 @@ Cilium 阶段使用 `helm --atomic --wait`，并在重试前清理 pending 或 f
 
 ### Resource Manifest
 
-每个 Build 对应 `manifests/builds/` 下的一份 YAML Resource Manifest，并通过 `go:embed` 编入 CLI。Manifest 固定支持的平台、节点二进制、安装机二进制、Installer 生成镜像与节点镜像。可通过 `--manifest` 指定自定义清单。
+每个 Build 对应 `manifests/builds/` 下的一份 YAML Resource Manifest，并通过 `go:embed` 编入 CLI。Manifest 固定支持的平台、节点二进制、安装机二进制、Installer 镜像与节点镜像。Installer 镜像应使用 `source` 与不可变的 `digest`；`binary` 形式是兼容回退。可通过 `--manifest` 指定自定义清单。
+
+```yaml
+spec:
+  installer:
+    images:
+      - name: haproxy
+        version: 3.2.26
+        os: linux
+        arch: amd64
+        source: ghcr.io/kube-dosh/kube-do-haproxy:3.2.26-amd64
+        digest: sha256:<verified-digest>
+        target: haproxy:3.2.26-amd64
+```
 
 在不修改基础清单的情况下生成新 Build：
 
@@ -412,6 +426,8 @@ CGO_ENABLED=0 go build -trimpath -o kube-do ./cmd/kube-do
 ```
 
 `bump` 可更新 Kubernetes、Cilium、containerd、runc、CNI Plugins、crictl、Helm、Cilium CLI、Distribution、HAProxy 与 keepalived 版本。它会重新计算二进制校验值、解析依赖镜像版本，并且不会原地修改基础 Manifest。发布前应人工审查生成的清单。
+
+预构建 HA 镜像由 [HA runtime image 工作流](.github/workflows/ha-images.yml)使用 Manifest 中固定的源码构建。工作流在 AlmaLinux 9 基线上构建 `amd64` 与 `arm64` 镜像，并在 Job Summary 中输出每个镜像的 digest。更新这类 Manifest 时，必须先重建并发布镜像，再固定新的 digest；`manifest bump` 会拒绝自动修改这类 Build 的 HA 版本。
 
 ### 资源缓存
 
@@ -453,13 +469,15 @@ sha256sum -c checksums.txt
 - Debian 12 `amd64` 相同拓扑的全新安装。
 - 容器化 HAProxy 与 keepalived，包括 VIP 故障切换与节点重启恢复。
 - Cilium kube-proxy replacement、CoreDNS 与 Hubble Relay 就绪。
-- Fedora 44 `amd64` 三控制平面 + 五 Worker 实验环境安装。
-- Fedora 实验环境的 daemon API 正常路径 E2E：鉴权、集群注册、重复注册与不支持请求、同集群任务冲突、带 `etcdutl` 校验和 SHA-256 核对的 etcd 备份、结构化证书检查、任务取消语义，以及 daemon 重启后的任务历史恢复。
+- Fedora 44 `amd64` 在隔离 libvirt 网络中的三控制平面 + 一 Worker 全新离线安装。
+- Debian 13 `amd64` 相同拓扑的全新离线安装。
+- Debian 13 `amd64` 上固定 digest 的预构建 HAProxy 与 keepalived 镜像搬运：校验源与目标 digest 一致，HA 容器正常启动，并通过 VIP API 就绪检查，全程不编译本地 HA 产物。
+- 两个全新安装上的 daemon API 正常路径 E2E：鉴权、集群注册、重复注册与不支持请求、同集群任务冲突、带 `etcdutl` 校验和 SHA-256 核对的 etcd 备份、结构化证书检查、任务取消语义，以及 daemon 重启后的任务历史恢复。
 
 尚未验证：
 
 - 真实 RHEL 9 物理机、非默认 MTU、复杂交换网络与生产网络行为。
-- Debian 13、Ubuntu 22.04/24.04 与所有 `arm64` 目标的端到端安装。
+- Ubuntu 22.04/24.04 与所有 `arm64` 目标的端到端安装。
 - 任意安装机与目标机 glibc ABI 组合。
 - 长期稳定性、突然断电恢复，以及所有安装中断场景的自动续跑。
 - etcd 恢复演练、证书轮换、升级、回滚、控制平面扩容、节点移除、网络分区，以及多发行版/多架构 API E2E。
@@ -476,7 +494,7 @@ kube-do 面向受控的隔离环境。使用前请确认以下运维特征：
 - HAProxy 与 keepalived 使用 `hostNetwork`；keepalived 还使用 `hostPID` 和额外网络 Capability。
 - RHEL 系目标节点会按设计禁用 SELinux。
 - 目标节点会关闭 Swap、zram、firewalld 与 ufw。
-- HAProxy 与 keepalived 镜像继承安装机的运行库，必须在 ABI 兼容环境中构建。
+- 预构建 HAProxy 与 keepalived 镜像携带固定的 AlmaLinux 9 运行库基线；旧的本地构建回退仍继承安装机运行库，并要求 ABI 兼容。
 
 请使用专用管理网络，限制对 `8080` 与 `5000` 端口的访问，并避免将安装机直接暴露到不可信网络。
 
@@ -488,14 +506,14 @@ kube-do 面向受控的隔离环境。使用前请确认以下运维特征：
 - daemon 重启后不会继续执行任务；运行中的任务会标记为中断。
 - 由 `kubeadm join --control-plane` 加入的控制平面节点可能缺少部分证书，当前只报告缺失，不自动判定为异常。
 - Registry 不支持认证、RBAC、Web UI 或复制。
-- 不支持 HAProxy 与 keepalived 镜像的跨架构构建。
+- 不支持在安装机上跨架构构建 HA 镜像，应使用 CI 按架构构建并固定 digest 的预构建镜像；安装机仍因 Registry 与旧回退路径而与目标架构一致。
 - 不支持非 Linux 目标节点。
 - 不内置 SCP 资源分发路径。
 - 尚未完成生产级加固，也不提供长期支持保证。
 
 ## 开发
 
-前置条件：Go 1.27，以及上文列出的 HA 原生构建依赖。只有执行安装 Playbook 时才需要 Ansible。
+前置条件：Go 1.27。上文列出的 HA 原生构建依赖只在本地构建回退路径中需要。只有执行安装 Playbook 时才需要 Ansible。
 
 ```bash
 CGO_ENABLED=0 go build -trimpath -o kube-do ./cmd/kube-do
@@ -554,6 +572,7 @@ kube-do/
 - [ADR-0005：安装机 ABI 兼容性](docs/adr/0005-installer-host-build-abi.md)
 - [ADR-0006：多平台 Manifest](docs/adr/0006-multi-platform-manifest-and-debian-arm64.md)
 - [ADR-0007：容器化 HAProxy 与 keepalived](docs/adr/0007-keepalived-runs-as-containerd-container.md)
+- [ADR-0008：预构建 HA 运行时镜像](docs/adr/0008-prebuilt-ha-runtime-images.md)
 
 ## 贡献
 

@@ -1,10 +1,10 @@
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 timeouts:
-  controlPlaneComponentHealthCheck: 10m
-  etcdAPICall: 5m
-  kubeletHealthCheck: 10m
-  kubernetesAPICall: 5m
+  controlPlaneComponentHealthCheck: {{ kube_do_kubeadm_control_plane_health_timeout }}
+  etcdAPICall: {{ kube_do_kubeadm_etcd_api_timeout }}
+  kubeletHealthCheck: {{ kube_do_kubeadm_kubelet_health_timeout }}
+  kubernetesAPICall: {{ kube_do_kubeadm_kubernetes_api_timeout }}
 localAPIEndpoint:
   advertiseAddress: {{ kube_do_node_ip }}
   bindPort: 6443
@@ -40,6 +40,26 @@ etcd:
   local:
     imageRepository: {{ registry_address }}/{{ registry_namespace }}
     imageTag: {{ kube_do_etcd_image.tag }}
+{% if kube_do_kubeadm_controller_manager_leader_elect_lease_duration %}
+controllerManager:
+  extraArgs:
+    - name: leader-elect-lease-duration
+      value: "{{ kube_do_kubeadm_controller_manager_leader_elect_lease_duration }}"
+    - name: leader-elect-renew-deadline
+      value: "{{ kube_do_kubeadm_controller_manager_leader_elect_renew_deadline }}"
+    - name: leader-elect-retry-period
+      value: "{{ kube_do_kubeadm_controller_manager_leader_elect_retry_period }}"
+{% endif %}
+{% if kube_do_kubeadm_scheduler_leader_elect_lease_duration %}
+scheduler:
+  extraArgs:
+    - name: leader-elect-lease-duration
+      value: "{{ kube_do_kubeadm_scheduler_leader_elect_lease_duration }}"
+    - name: leader-elect-renew-deadline
+      value: "{{ kube_do_kubeadm_scheduler_leader_elect_renew_deadline }}"
+    - name: leader-elect-retry-period
+      value: "{{ kube_do_kubeadm_scheduler_leader_elect_retry_period }}"
+{% endif %}
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration

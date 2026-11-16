@@ -1,0 +1,5 @@
+---
+kube_do_ha_container_ready_retries: 20
+kube_do_ha_container_ready_delay: 2
+kube_do_ha_vip_ready_retries: 20
+kube_do_ha_vip_ready_delay: 2

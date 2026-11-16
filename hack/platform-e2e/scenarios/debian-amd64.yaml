@@ -1,0 +1,59 @@
+---
+name: debian-amd64
+description: Debian 13 on native amd64 KVM with three control planes and one worker.
+os: debian
+osInfo: debian13
+version: "13"
+arch: amd64
+acceleration: kvm
+firmware: bios
+image:
+  url: https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-genericcloud-amd64-20261111-2659.qcow2
+  sha256: e2d95cfb631bf38e30017c32653c2536b8d95447d4083040faffd147942ab9e9
+network:
+  name: kubedo-e2e-debian
+  bridge: virbr124
+  cidr: 192.168.124.0/24
+  gateway: 192.168.124.1
+  dns:
+    - 1.1.1.1
+proxy:
+  host: http://127.0.0.1:1080
+  guestPort: 1080
+cluster:
+  name: platform-debian-amd64
+  build: v1.36.5-kube-do.1
+  vip: 192.168.124.50
+  apiPort: 16443
+  vrrp:
+    routerId: 124
+    password: debian
+installer:
+  name: installer
+  address: 192.168.124.10
+  vcpus: 2
+  memoryMiB: 4096
+  diskGiB: 40
+controlPlane:
+  - name: cp-1
+    address: 192.168.124.100
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+  - name: cp-2
+    address: 192.168.124.101
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+  - name: cp-3
+    address: 192.168.124.103
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+workers:
+  - name: worker-1
+    address: 192.168.124.200
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+extraVars: {}

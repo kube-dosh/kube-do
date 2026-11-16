@@ -107,7 +107,15 @@
   changed_when: false
 
 - name: Upload control-plane certificates for joining nodes
-  ansible.builtin.command: /usr/local/bin/kubeadm init phase upload-certs --upload-certs
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubeadm
+      - init
+      - phase
+      - upload-certs
+      - --upload-certs
+      - --config
+      - /etc/kubernetes/kubeadm-config.yaml
   register: kube_do_upload_certs
   changed_when: false
 

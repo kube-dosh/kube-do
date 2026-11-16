@@ -1,5 +1,7 @@
 # Installer Host 构建 ABI 必须兼容目标平台
 
+> **Status:** 已被 [ADR-0008](./0008-prebuilt-ha-runtime-images.md) 取代。默认路径改为 CI 预构建并固定 digest；本文描述的本机构建只作为离线回退保留。
+
 HAProxy 与 keepalived 没有本工程可直接使用的官方发布二进制，因此 kube-do 在 Installer Host 上从固定源码原生构建这两个程序。两个产物分别与构建机上的动态库一起打成单架构 Installer 镜像，再推送到私有 Registry；目标节点不接收这两个宿主机二进制。这意味着 Installer Host 不只是“下载机”：它的 CPU 架构、C 运行库和工具链 ABI 会直接决定镜像能否在目标节点运行。
 
 当前约束是 Installer Host 架构与目标一致（`amd64` 或 `arm64`），并且构建环境的 glibc 不新于目标节点：RHEL 系 9 目标使用 RHEL 系 9 兼容环境，Debian/Ubuntu 目标使用对应或更老的 Debian 系环境。Fedora 44 是受支持的例外，但仅当 Installer Host 与全部目标节点都是 Fedora 44；把 Fedora 44 构建的产物分发到 RHEL 9 目标不在支持范围内，常见故障是目标节点报 `GLIBC_x.y not found`。本版不做 HAProxy/keepalived 交叉编译。两个 HA 镜像都自带构建机的运行库，因此镜像运行仍受同一 ABI 约束，详见 [ADR-0007](./0007-keepalived-runs-as-containerd-container.md)。

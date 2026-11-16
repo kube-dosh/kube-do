@@ -273,6 +273,11 @@ func applyBinary(ctx context.Context, opts *Options, m *manifest.Manifest, name,
 	if len(binaries) == 0 {
 		return fmt.Errorf("binary %q is not present in the base manifest", name)
 	}
+	for _, b := range binaries {
+		if hasPrebuiltInstallerImage(m, b) {
+			return fmt.Errorf("cannot bump %s automatically: prebuilt Installer images must be rebuilt, published, and pinned by digest before updating this Build", name)
+		}
+	}
 	checksums := map[string]string{}
 	for _, b := range binaries {
 		version, url, built := componentVersionAndURL(*b, raw)
@@ -302,6 +307,15 @@ func applyBinary(ctx context.Context, opts *Options, m *manifest.Manifest, name,
 		*changes = append(*changes, fmt.Sprintf("binary %s %s/%s %s -> %s", name, b.OS, b.Arch, old, version))
 	}
 	return nil
+}
+
+func hasPrebuiltInstallerImage(m *manifest.Manifest, b *manifest.Binary) bool {
+	for _, img := range m.Spec.Installer.Images {
+		if img.IsPrebuilt() && img.Name == b.Name && img.OS == b.OS && img.Arch == b.Arch {
+			return true
+		}
+	}
+	return false
 }
 
 func syncInstallerImageVersion(m *manifest.Manifest, binaryName, binaryOS, binaryArch, oldVersion, newVersion string, changes *[]string) {

@@ -1,0 +1,11 @@
+---
+kube_do_kubeadm_control_plane_health_timeout: 10m
+kube_do_kubeadm_etcd_api_timeout: 5m
+kube_do_kubeadm_kubelet_health_timeout: 10m
+kube_do_kubeadm_kubernetes_api_timeout: 5m
+kube_do_kubeadm_controller_manager_leader_elect_lease_duration: ""
+kube_do_kubeadm_controller_manager_leader_elect_renew_deadline: ""
+kube_do_kubeadm_controller_manager_leader_elect_retry_period: ""
+kube_do_kubeadm_scheduler_leader_elect_lease_duration: ""
+kube_do_kubeadm_scheduler_leader_elect_renew_deadline: ""
+kube_do_kubeadm_scheduler_leader_elect_retry_period: ""

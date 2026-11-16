@@ -140,6 +140,31 @@ func TestParseInstallerImages(t *testing.T) {
 	}
 }
 
+func TestRequiredInstallerBinariesSkipsPrebuiltOnlyBuilds(t *testing.T) {
+	m := &Manifest{Spec: Spec{
+		Installer: Installer{
+			Binaries: []Binary{
+				{Name: "registry", Version: "3.1.2", OS: "linux", Arch: "amd64", SHA256: testSHA},
+				{Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64", Build: BuildHAProxy, SourceSHA256: testSHA},
+			},
+			Images: []InstallerImage{
+				{Name: "registry-runtime", Version: "3.1.2", OS: "linux", Arch: "amd64", Binary: "registry"},
+				{Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64", Source: "ghcr.io/example/haproxy:3.2.26-amd64", Digest: "sha256:" + testSHA},
+			},
+		},
+	}}
+	required := m.RequiredInstallerBinariesFor("linux", "amd64")
+	if len(required) != 1 || required[0].Name != "registry" {
+		t.Fatalf("required Installer binaries = %#v", required)
+	}
+
+	m.Spec.Installer.Images[1] = InstallerImage{Name: "haproxy", Version: "3.2.26", OS: "linux", Arch: "amd64", Binary: "haproxy"}
+	required = m.RequiredInstallerBinariesFor("linux", "amd64")
+	if len(required) != 2 || required[1].Name != "haproxy" {
+		t.Fatalf("required Installer binaries with local fallback = %#v", required)
+	}
+}
+
 func TestValidateRejectsInstallerImageWithoutBinary(t *testing.T) {
 	bad := strings.Replace(multiPlatformInstallerImageManifestYAML(), "        binary: registry\n      - name: registry-runtime\n        version: 3.1.2\n        os: linux\n        arch: arm64", "        binary: missing\n      - name: registry-runtime\n        version: 3.1.2\n        os: linux\n        arch: arm64", 1)
 	_, err := Parse([]byte(bad))
@@ -169,6 +194,58 @@ func TestValidateRejectsUnversionedInstallerImageTarget(t *testing.T) {
 	_, err := Parse([]byte(bad))
 	if err == nil || !strings.Contains(err.Error(), "target tag") {
 		t.Fatalf("expected target tag error, got %v", err)
+	}
+}
+
+func prebuiltInstallerImageManifestYAML() string {
+	images := `
+    images:
+      - name: haproxy
+        version: 3.2.26
+        os: linux
+        arch: amd64
+        source: ghcr.io/kube-dosh/kube-do/haproxy:3.2.26-amd64
+        digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        target: haproxy:3.2.26-amd64
+      - name: haproxy
+        version: 3.2.26
+        os: linux
+        arch: arm64
+        source: ghcr.io/kube-dosh/kube-do/haproxy:3.2.26-arm64
+        digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        target: haproxy:3.2.26-arm64
+`
+	base := strings.Replace(multiPlatformManifestYAML(), "\n  binaries:\n", images+"  binaries:\n", 1)
+	return strings.Replace(base, "  installer:\n    binaries: []\n", "  installer:\n    binaries: []\n", 1)
+}
+
+func TestParsePrebuiltInstallerImages(t *testing.T) {
+	m, err := Parse([]byte(prebuiltInstallerImageManifestYAML()))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	images := m.InstallerImagesFor("linux", "arm64")
+	if len(images) != 1 || !images[0].IsPrebuilt() || images[0].Binary != "" {
+		t.Fatalf("Installer images = %#v", images)
+	}
+	if images[0].Digest != "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" {
+		t.Fatalf("digest = %q", images[0].Digest)
+	}
+}
+
+func TestValidateRejectsPrebuiltInstallerImageWithoutDigest(t *testing.T) {
+	bad := strings.Replace(prebuiltInstallerImageManifestYAML(), "        digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n", "", 1)
+	_, err := Parse([]byte(bad))
+	if err == nil || !strings.Contains(err.Error(), "digest must be a pinned sha256 digest") {
+		t.Fatalf("expected digest error, got %v", err)
+	}
+}
+
+func TestValidateRejectsPrebuiltInstallerImageWithBinary(t *testing.T) {
+	bad := strings.Replace(prebuiltInstallerImageManifestYAML(), "        digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n        target: haproxy:3.2.26-amd64\n", "        digest: sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n        binary: haproxy\n        target: haproxy:3.2.26-amd64\n", 1)
+	_, err := Parse([]byte(bad))
+	if err == nil || !strings.Contains(err.Error(), "source and binary are mutually exclusive") {
+		t.Fatalf("expected source/binary conflict, got %v", err)
 	}
 }
 

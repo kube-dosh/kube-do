@@ -4,6 +4,6 @@
 
 发行版选择分为 `rhel` 与 `debian` 两个家族。`rhel` 覆盖 RHEL 系 9；`debian` 首批覆盖 Debian 12/13 与 Ubuntu 22.04/24.04。目标节点继续使用固定 Manifest 中的上游二进制，不从 apt/dnf 安装 Kubernetes、containerd 或 runc；Ansible 只负责发行版差异（SELinux 与 firewalld/ufw、内核模块与服务管理）。目标机必须预装 Python 3 供 Ansible 使用。
 
-Installer Host 必须与目标同架构，因为 HAProxy/keepalived 是原生构建；因此 `download`、`registry` 与 `check` 会在架构不匹配时 fail-fast。一个 Build 虽同时携带 amd64/arm64 资源，但不能在 amd64 下载机上构建 arm64 的 HAProxy/keepalived 镜像。节点镜像下载不受架构选择影响，但因 Installer Host 约束仍与目标架构一致。
+Installer Host 当前仍必须与目标同架构，主要原因是 Registry 安装二进制和尚未迁移的本地 HA 回退路径都是原生程序；因此 `download`、`registry` 与 `check` 会在架构不匹配时 fail-fast。HA 镜像工作流按 `amd64`/`arm64` 分别构建并固定 digest；使用预构建路径时不再要求下载机现场编译，跨架构安装则可在后续把 Installer Host 二进制与目标节点二进制彻底分离后放开。节点镜像下载不受架构选择影响，但因 Installer Host 约束仍与目标架构一致。
 
-**Considered Options**: 一个 Build + `spec.platforms`（选中）；每个平台一个 Build（升级与镜像清单容易漂移）；把安装器二进制视为架构无关（错误，Registry 与 HA 构建产物均为原生程序）；跨架构构建 HAProxy/keepalived（本版不做）。
+**Considered Options**: 一个 Build + `spec.platforms`（选中）；每个平台一个 Build（升级与镜像清单容易漂移）；把安装器二进制视为架构无关（错误，Registry 与本地 HA 回退产物仍为原生程序）；跨架构构建 HAProxy/keepalived（改由 CI 多架构预构建解决）。
