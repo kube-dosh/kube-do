@@ -39,5 +39,5 @@
   ansible.builtin.systemd:
     name: kubelet
     enabled: true
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
 

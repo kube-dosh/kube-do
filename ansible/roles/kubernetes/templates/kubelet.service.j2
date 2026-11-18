@@ -3,6 +3,7 @@ Description=kubelet
 Documentation=https://kubernetes.io/docs/
 After=network-online.target containerd.service
 Wants=network-online.target
+ConditionPathExists=/var/lib/kubelet/config.yaml
 
 [Service]
 ExecStart=/usr/local/bin/kubelet \

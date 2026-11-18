@@ -7,6 +7,7 @@ version: "44"
 arch: amd64
 acceleration: kvm
 firmware: bios
+rpmMirror: https://mirrors.tuna.tsinghua.edu.cn/fedora
 image:
   url: https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2
   sha256: 28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f

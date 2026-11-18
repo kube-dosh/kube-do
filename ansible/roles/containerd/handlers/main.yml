@@ -1,11 +1,12 @@
 ---
 - name: Reload systemd
   ansible.builtin.systemd:
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
+  when: kube_do_systemd_daemon_reload | bool
 
 - name: Restart containerd
   ansible.builtin.systemd:
     name: containerd
     state: restarted
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
 

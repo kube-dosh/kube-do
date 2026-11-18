@@ -165,6 +165,7 @@ fi
 cat >"$WORK_ROOT/platform.env" <<EOF
 export KUBE_DO_E2E_GUEST_PROXY=$(printf '%q' "$guest_proxy")
 export KUBE_DO_E2E_NETWORK_CIDR=$(printf '%q' "$NET_CIDR")
+export KUBE_DO_E2E_INSTALL_TAGS=$(printf '%q' "${KUBE_DO_E2E_INSTALL_TAGS:-}")
 EOF
 vm_scp "$WORK_ROOT/platform.env" "$INSTALLER_IP" /opt/kube-do/platform.env
 

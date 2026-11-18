@@ -66,5 +66,5 @@
     name: kubelet
     state: started
     enabled: true
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
 

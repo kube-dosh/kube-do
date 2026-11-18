@@ -55,6 +55,22 @@ TCG 下单次 Kubernetes API 请求可能超过控制器默认的 5 秒租约续
 
 TCG 下 containerd 启动 HAProxy/keepalived 容器可能明显慢于 40 秒。角色默认仍只等待 20 次、每次 2 秒；TCG 场景通过 `kube_do_ha_{container,vip}_ready_{retries,delay}` 延长等待，不修改生产默认值。
 
+TCG 下 systemd 的 `daemon-reload` 也可能超时。HA 角色的单元加载和重启默认重试 3 次；TCG 场景通过 `kube_do_ha_systemd_{retries,delay}` 延长重试窗口。
+
+Fedora TCG 上 `daemon-reload` 的 D-Bus 调用可能持续超过 100 秒，重试无法自愈。两个 TCG 场景因此通过 `kube_do_systemd_daemon_reload: false` 让新增单元按需加载；生产默认仍为 `true`，不改变正常节点的 systemd 重载语义。
+
+`kubeadm init` 无法通过 Ansible 变量关闭内部的 `systemctl daemon-reload`。为避免 TCG 下该调用把初始化卡死，TCG Cloud Image 的 cloud-init 会在测试节点安装 `/usr/local/bin/systemctl` 包装器：它只跳过 `daemon-reload`，其他子命令仍转发给 `/usr/bin/systemctl`。包装器只存在于临时 TCG 测试节点，不进入生产安装路径；跳过日志写入 `/var/log/kube-do-e2e-systemctl.log`。
+
+kubelet 单元带有 `ConditionPathExists=/var/lib/kubelet/config.yaml`。即使 systemd 在配置生成前尝试启动 kubelet，也不会形成崩溃重启循环；kubeadm 写入配置后，正常的 `systemctl start kubelet` 会立即生效。
+
+Fedora Cloud Image 的 `dnf-makecache` 在 TCG 下可能长期占用 CPU 并拖慢后续任务。测试场景的 cloud-init 会在 Fedora TCG 虚拟机中屏蔽该服务和 timer；该处理只存在于临时测试节点，不进入生产默认配置。
+
+Fedora TCG 的 `systemd-logind` 也可能因 D-Bus 超时阻塞新的 SSH session。测试 cloud-init 会仅在该场景停用 `pam_systemd` 的 SSH session 注册，使 Ansible 连接可以建立；目标节点的服务管理仍由 systemd 负责。
+
+Fedora 场景通过 `rpmMirror` 将 Guest 的 `fedora` 与 `updates` RPM 仓库切换到清华 TUNA，并禁用 Cloud Image 自带的上游仓库定义。该配置只存在于临时测试 VM，不改变生产节点。`dl.k8s.io` 和 `cdn.registry.k8s.io` 在本测试代理链路上可能发生 TLS EOF，因此安装机的测试环境将这两个域名及其子域加入 `no_proxy`，直接下载 Kubernetes 二进制和容器层；这不改变生产安装机的代理配置。
+
+迭代排查时，可以设置 `KUBE_DO_E2E_INSTALL_TAGS=ha,init,join,cilium,verify`，只重跑安装阶段，不重复已经完成的主机前置配置。该变量仅由测试工具转发，不改变 `kube-do install` 的生产默认值。
+
 若实测 etcd 在 TCG 下出现选举或磁盘超时，应先增加测试场景中的 etcd 时序参数，而不是修改生产默认配置。
 
 TCG 慢速 udev 可能让 systemd 的 device unit 在 cloud-init 启动前超时。场景可通过 `kernelArgs` 给测试 VM 的引导项追加参数：Fedora 修改 BLS 条目，Debian 修改 GRUB 配置。当前两个 arm64 TCG 场景都使用 `systemd.default_device_timeout_sec=300`。该参数只写入本次临时 VM 的 overlay 镜像，不进入生产代码或目标节点配置。

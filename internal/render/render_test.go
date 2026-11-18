@@ -143,6 +143,9 @@ spec:
 	if vars["kube_do_build"] != "test-build" {
 		t.Fatalf("kube_do_build = %v", vars["kube_do_build"])
 	}
+	if vars["kube_do_systemd_daemon_reload"] != true {
+		t.Fatalf("kube_do_systemd_daemon_reload = %v", vars["kube_do_systemd_daemon_reload"])
+	}
 	if vars["control_plane_endpoint"] != "https://10.0.0.100:16443" {
 		t.Fatalf("endpoint = %v", vars["control_plane_endpoint"])
 	}

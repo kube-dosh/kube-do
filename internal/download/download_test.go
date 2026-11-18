@@ -19,8 +19,11 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/empty"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/types"
 
 	"github.com/kube-dosh/kube-do/internal/layout"
 	"github.com/kube-dosh/kube-do/internal/manifest"
@@ -330,6 +333,63 @@ func TestMirrorImage(t *testing.T) {
 	}
 	if srcDesc.Digest != dstDesc.Digest {
 		t.Fatalf("digest mismatch: %s != %s", srcDesc.Digest, dstDesc.Digest)
+	}
+}
+
+func TestMirrorImageSelectsTargetPlatform(t *testing.T) {
+	src := httptest.NewServer(registry.New())
+	defer src.Close()
+	dst := httptest.NewServer(registry.New())
+	defer dst.Close()
+	srcHost := strings.TrimPrefix(src.URL, "http://")
+	dstHost := strings.TrimPrefix(dst.URL, "http://")
+
+	amd64Image, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	arm64Image, err := random.Image(2048, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := mutate.AppendManifests(
+		empty.Index,
+		mutate.IndexAddendum{Add: amd64Image, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: "amd64"}}},
+		mutate.IndexAddendum{Add: arm64Image, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: "arm64"}}},
+	)
+	srcRef, err := name.ParseReference(srcHost+"/upstream/pause:v1", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.WriteIndex(srcRef, index); err != nil {
+		t.Fatalf("seed source registry: %v", err)
+	}
+	wantDigest, err := amd64Image.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := testManifest(nil, []manifest.Image{{Name: "pause", Source: srcRef.String(), Target: "pause:v1"}})
+	if _, err := Run(context.Background(), Options{
+		CacheDir: t.TempDir(), RegistryAddress: dstHost, Manifest: m, ImagesOnly: true, Insecure: true,
+		OS: "linux", Arch: "amd64",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	dstRef, err := name.ParseReference(dstHost+"/kube-do/pause:v1", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstDesc, err := remote.Get(dstRef)
+	if err != nil {
+		t.Fatalf("mirrored image not found: %v", err)
+	}
+	if dstDesc.MediaType == types.OCIImageIndex || dstDesc.MediaType == types.DockerManifestList {
+		t.Fatalf("mirrored image is still an index: %s", dstDesc.MediaType)
+	}
+	if dstDesc.Digest != wantDigest {
+		t.Fatalf("mirrored digest = %s, want selected linux/amd64 manifest %s", dstDesc.Digest, wantDigest)
 	}
 }
 

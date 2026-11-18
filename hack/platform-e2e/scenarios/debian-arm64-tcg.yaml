@@ -92,5 +92,8 @@ extraVars:
   kube_do_ha_container_ready_delay: 10
   kube_do_ha_vip_ready_retries: 180
   kube_do_ha_vip_ready_delay: 10
+  kube_do_ha_systemd_retries: 30
+  kube_do_ha_systemd_delay: 10
+  kube_do_systemd_daemon_reload: false
 kernelArgs:
   - systemd.default_device_timeout_sec=300

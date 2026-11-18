@@ -14,6 +14,7 @@ WORK_DIR=$4
 EXTRA_VARS_FILE=${5:-}
 OPS_TIMEOUT=${6:-15m}
 KUBE_DO_BIN=${KUBE_DO_BIN:-/opt/kube-do/kube-do}
+INSTALL_TAGS=${KUBE_DO_E2E_INSTALL_TAGS:-}
 LOG_DIR="$WORK_DIR/logs"
 
 mkdir -p "$CACHE_DIR" "$WORK_DIR" "$LOG_DIR"
@@ -25,7 +26,7 @@ if [[ -n "${KUBE_DO_E2E_GUEST_PROXY:-}" ]]; then
   export HTTP_PROXY=$KUBE_DO_E2E_GUEST_PROXY
   export HTTPS_PROXY=$KUBE_DO_E2E_GUEST_PROXY
 fi
-export no_proxy="127.0.0.1,localhost,${KUBE_DO_E2E_NETWORK_CIDR:-}"
+export no_proxy="127.0.0.1,localhost,dl.k8s.io,.dl.k8s.io,cdn.registry.k8s.io,.cdn.registry.k8s.io,${KUBE_DO_E2E_NETWORK_CIDR:-}"
 export NO_PROXY=$no_proxy
 export KUBE_DO_CACHE_DIR=$CACHE_DIR
 
@@ -88,11 +89,17 @@ if [[ -n "$EXTRA_VARS_FILE" && -f "$EXTRA_VARS_FILE" ]]; then
   done <"$EXTRA_VARS_FILE"
 fi
 
+tag_args=()
+if [[ -n "$INSTALL_TAGS" ]]; then
+  tag_args+=(--tags "$INSTALL_TAGS")
+fi
+
 log "Installing the cluster"
 "$KUBE_DO_BIN" install \
   --config "$CONFIG" \
   --ansible-dir "$ANSIBLE_DIR" \
   --out "$WORK_DIR/rendered" \
+  "${tag_args[@]}" \
   "${extra_args[@]}"
 
 log "Collecting CLI etcd backup result"

@@ -1,5 +1,6 @@
 ---
 - name: Reload kubelet units
   ansible.builtin.systemd:
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
+  when: kube_do_systemd_daemon_reload | bool
 

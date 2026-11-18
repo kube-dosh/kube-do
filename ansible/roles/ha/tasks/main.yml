@@ -146,7 +146,11 @@
     name: kube-do-haproxy
     enabled: true
     state: started
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
+  register: kube_do_haproxy_service
+  retries: "{{ kube_do_ha_systemd_retries }}"
+  delay: "{{ kube_do_ha_systemd_delay }}"
+  until: kube_do_haproxy_service is succeeded
 
 - name: Apply pending HAProxy changes before keepalived starts tracking it
   ansible.builtin.meta: flush_handlers
@@ -190,7 +194,11 @@
     name: kube-do-keepalived
     enabled: true
     state: started
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
+  register: kube_do_keepalived_service
+  retries: "{{ kube_do_ha_systemd_retries }}"
+  delay: "{{ kube_do_ha_systemd_delay }}"
+  until: kube_do_keepalived_service is succeeded
 
 - name: Wait for the keepalived container task
   ansible.builtin.command: /usr/local/bin/ctr --namespace kube-do tasks ps keepalived

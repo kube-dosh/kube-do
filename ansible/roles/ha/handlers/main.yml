@@ -1,16 +1,29 @@
 ---
 - name: Reload HA units
   ansible.builtin.systemd:
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
+  when: kube_do_systemd_daemon_reload | bool
+  register: kube_do_ha_units_reload
+  retries: "{{ kube_do_ha_systemd_retries }}"
+  delay: "{{ kube_do_ha_systemd_delay }}"
+  until: kube_do_ha_units_reload is succeeded
 
 - name: Restart HAProxy
   ansible.builtin.systemd:
     name: kube-do-haproxy
     state: restarted
+  register: kube_do_ha_haproxy_restart
+  retries: "{{ kube_do_ha_systemd_retries }}"
+  delay: "{{ kube_do_ha_systemd_delay }}"
+  until: kube_do_ha_haproxy_restart is succeeded
 
 - name: Restart keepalived
   ansible.builtin.systemd:
     name: kube-do-keepalived
     state: restarted
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
+  register: kube_do_ha_keepalived_restart
+  retries: "{{ kube_do_ha_systemd_retries }}"
+  delay: "{{ kube_do_ha_systemd_delay }}"
+  until: kube_do_ha_keepalived_restart is succeeded
 

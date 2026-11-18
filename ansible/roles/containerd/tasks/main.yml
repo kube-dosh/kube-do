@@ -176,5 +176,5 @@
     name: containerd
     enabled: true
     state: started
-    daemon_reload: true
+    daemon_reload: "{{ kube_do_systemd_daemon_reload }}"
 

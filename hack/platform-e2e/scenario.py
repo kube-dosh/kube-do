@@ -159,6 +159,11 @@ def validate(scenario: dict[str, Any]) -> None:
     if not isinstance(extra, dict):
         fail("extraVars must be a mapping")
 
+    rpm_mirror = scenario.get("rpmMirror")
+    if rpm_mirror is not None:
+        if not isinstance(rpm_mirror, str) or not rpm_mirror.startswith(("http://", "https://")):
+            fail("rpmMirror must be an http(s) URL")
+
     kernel_args = scenario.get("kernelArgs") or []
     if not isinstance(kernel_args, list):
         fail("kernelArgs must be a list")
@@ -309,18 +314,46 @@ def user_data(scenario: dict[str, Any], role: str, node_name: str, ssh_public_ke
     hostname = f"{scenario['name']}-{node_name}" if role == "installer" else f"{scenario['name']}-{node_name}"
     network = scenario["network"]
     os_name = scenario["os"]
+    rpm_mirror = scenario.get("rpmMirror")
     write_files: list[dict[str, Any]] = [
         {
             "path": "/etc/ssh/sshd_config.d/00-kube-do-e2e.conf",
             "permissions": "0644",
             "content": "PermitRootLogin prohibit-password\nPubkeyAuthentication yes\nPasswordAuthentication no\n",
-        }
+        },
     ]
     runcmd = [
         "install -d -m 0755 /var/lib/kube-do-e2e",
         "usermod -U root 2>/dev/null || true",
         "systemctl enable --now sshd 2>/dev/null || systemctl enable --now ssh 2>/dev/null || true",
     ]
+    if "fedora" in os_name and scenario.get("acceleration") == "tcg":
+        runcmd.append(
+            "systemctl mask --now dnf-makecache.service dnf-makecache.timer 2>/dev/null || true"
+        )
+    if scenario.get("acceleration") == "tcg":
+        write_files.append(
+            {
+                "path": "/usr/local/bin/systemctl",
+                "permissions": "0755",
+                "content": (
+                    "#!/bin/sh\n"
+                    "for arg in \"$@\"; do\n"
+                    "  if [ \"$arg\" = daemon-reload ]; then\n"
+                    "    echo \"$(date -u +%FT%TZ) kube-do-e2e: skip systemctl daemon-reload under TCG\" >>/var/log/kube-do-e2e-systemctl.log\n"
+                    "    exit 0\n"
+                    "  fi\n"
+                    "done\n"
+                    "exec /usr/bin/systemctl \"$@\"\n"
+                ),
+            }
+        )
+        runcmd.extend(
+            [
+                "sed -i 's/^-\\(session.*pam_systemd\\.so\\)$/\\# \\1/' /etc/pam.d/system-auth /etc/pam.d/password-auth",
+                "systemctl restart sshd",
+            ]
+        )
     if role == "installer":
         if guest_proxy:
             write_files.append(
@@ -332,11 +365,44 @@ def user_data(scenario: dict[str, Any], role: str, node_name: str, ssh_public_ke
                         f"export https_proxy={shlex.quote(guest_proxy)}\n"
                         f"export HTTP_PROXY={shlex.quote(guest_proxy)}\n"
                         f"export HTTPS_PROXY={shlex.quote(guest_proxy)}\n"
-                        f"export no_proxy='127.0.0.1,localhost,{network['cidr']}'\n"
+                        f"export no_proxy='127.0.0.1,localhost,dl.k8s.io,.dl.k8s.io,cdn.registry.k8s.io,.cdn.registry.k8s.io,{network['cidr']}'\n"
                     ),
                 }
             )
         if "fedora" in os_name:
+            if rpm_mirror:
+                mirror = rpm_mirror.rstrip("/")
+                write_files.append(
+                    {
+                        "path": "/etc/yum.repos.d/fedora-kube-do-e2e.repo",
+                        "permissions": "0644",
+                        "content": (
+                            "[fedora-kube-do-e2e]\n"
+                            "name=Fedora $releasever - $basearch - kube-do E2E\n"
+                            f"baseurl={mirror}/releases/$releasever/Everything/$basearch/os/\n"
+                            "enabled=1\n"
+                            "gpgcheck=1\n"
+                            "repo_gpgcheck=0\n"
+                            "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-$releasever-$basearch\n"
+                            "countme=0\n"
+                            "\n"
+                            "[fedora-updates-kube-do-e2e]\n"
+                            "name=Fedora $releasever - $basearch - Updates - kube-do E2E\n"
+                            f"baseurl={mirror}/updates/$releasever/Everything/$basearch/\n"
+                            "enabled=1\n"
+                            "gpgcheck=1\n"
+                            "repo_gpgcheck=0\n"
+                            "gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-$releasever-$basearch\n"
+                            "countme=0\n"
+                        ),
+                    }
+                )
+                runcmd.append(
+                    "sed -i 's/^enabled=1/enabled=0/' "
+                    "/etc/yum.repos.d/fedora.repo /etc/yum.repos.d/fedora-updates.repo "
+                    "/etc/yum.repos.d/fedora-cisco-openh264.repo 2>/dev/null || true"
+                )
+                runcmd.append("dnf clean all >/dev/null")
             if guest_proxy:
                 write_files.append(
                     {

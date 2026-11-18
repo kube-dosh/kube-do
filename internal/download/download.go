@@ -486,7 +486,8 @@ func copyRemoteImage(source, target, wantDigest string, opts Options, remoteOpts
 		return fmt.Errorf("parse target: %w", err)
 	}
 	logf(opts, "mirror %s -> %s", src, dst)
-	desc, err := remote.Get(src, remoteOpts...)
+	imageOpts := append(append([]remote.Option{}, remoteOpts...), remote.WithPlatform(v1.Platform{OS: opts.OS, Architecture: opts.Arch}))
+	desc, err := remote.Get(src, imageOpts...)
 	if err != nil {
 		return err
 	}
@@ -498,11 +499,11 @@ func copyRemoteImage(source, target, wantDigest string, opts Options, remoteOpts
 	}
 	switch desc.MediaType {
 	case types.OCIImageIndex, types.DockerManifestList:
-		idx, err := desc.ImageIndex()
+		image, err := desc.Image()
 		if err != nil {
-			return err
+			return fmt.Errorf("select %s/%s from image index: %w", opts.OS, opts.Arch, err)
 		}
-		if err := remote.WriteIndex(dst, idx, remoteOpts...); err != nil {
+		if err := remote.Write(dst, image, remoteOpts...); err != nil {
 			return err
 		}
 	default:
