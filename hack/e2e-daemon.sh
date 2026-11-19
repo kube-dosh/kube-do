@@ -44,6 +44,8 @@ REQUIRE_CONFLICT=${KUBE_DO_E2E_REQUIRE_CONFLICT:-1}
 JOB_TIMEOUT=${KUBE_DO_E2E_JOB_TIMEOUT:-30m}
 BACKUP_TIMEOUT=${KUBE_DO_E2E_BACKUP_TIMEOUT:-10m}
 CERT_TIMEOUT=${KUBE_DO_E2E_CERT_TIMEOUT:-5m}
+BACKUP_WAIT_SECONDS=${KUBE_DO_E2E_BACKUP_WAIT_SECONDS:-900}
+CERT_WAIT_SECONDS=${KUBE_DO_E2E_CERT_WAIT_SECONDS:-600}
 PID=""
 
 mkdir -p "$WORK_ROOT" "$DATA_DIR" "$CACHE_DIR"
@@ -224,7 +226,7 @@ if [[ "$RUN_OPS" == "1" ]]; then
     fail "expected 409 while backup is running, got $HTTP_STATUS"
   fi
 
-  wait_job "$BACKUP_JOB" 900
+  wait_job "$BACKUP_JOB" "$BACKUP_WAIT_SECONDS"
   api_call GET "/api/v1/jobs/$BACKUP_JOB"
   expect_status 200
   jq_assert '.result.validated == true and (.result.sha256 | length == 64) and (.result.snapshot.totalKey > 0)'
@@ -242,7 +244,7 @@ if [[ "$RUN_OPS" == "1" ]]; then
     expect_status 202
     CERT_JOB=$(jq -r '.id' "$RESPONSE")
   fi
-  wait_job "$CERT_JOB" 600
+  wait_job "$CERT_JOB" "$CERT_WAIT_SECONDS"
   api_call GET "/api/v1/jobs/$CERT_JOB"
   expect_status 200
   jq_assert '.result.certificateCount > 0 and (.result.nodes | length > 0) and (.result | has("healthy"))'

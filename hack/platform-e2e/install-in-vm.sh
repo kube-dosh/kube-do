@@ -26,7 +26,7 @@ if [[ -n "${KUBE_DO_E2E_GUEST_PROXY:-}" ]]; then
   export HTTP_PROXY=$KUBE_DO_E2E_GUEST_PROXY
   export HTTPS_PROXY=$KUBE_DO_E2E_GUEST_PROXY
 fi
-export no_proxy="127.0.0.1,localhost,dl.k8s.io,.dl.k8s.io,cdn.registry.k8s.io,.cdn.registry.k8s.io,${KUBE_DO_E2E_NETWORK_CIDR:-}"
+export no_proxy="127.0.0.1,localhost,dl.k8s.io,.dl.k8s.io,${KUBE_DO_E2E_NETWORK_CIDR:-}"
 export NO_PROXY=$no_proxy
 export KUBE_DO_CACHE_DIR=$CACHE_DIR
 
@@ -62,7 +62,11 @@ log "Deploying or reusing the private Registry"
 retry 3 30 "$KUBE_DO_BIN" registry --config "$CONFIG" --cache-dir "$CACHE_DIR"
 
 log "Building and mirroring container images"
-retry 3 30 "$KUBE_DO_BIN" download --config "$CONFIG" --cache-dir "$CACHE_DIR" --images-only
+image_manifest_args=()
+if [[ -n "${KUBE_DO_E2E_IMAGES_MANIFEST:-}" ]]; then
+  image_manifest_args+=(--manifest "$KUBE_DO_E2E_IMAGES_MANIFEST")
+fi
+retry 3 30 "$KUBE_DO_BIN" download --config "$CONFIG" --cache-dir "$CACHE_DIR" --images-only "${image_manifest_args[@]}"
 
 if ! curl -fsS http://127.0.0.1:8080/ >/dev/null 2>&1; then
   log "Starting the artifact download server"

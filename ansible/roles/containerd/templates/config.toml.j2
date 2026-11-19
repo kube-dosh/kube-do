@@ -20,5 +20,5 @@ state = "/run/containerd"
       runtime_type = "io.containerd.runc.v2"
 
       [plugins."io.containerd.cri.v1.runtime".containerd.runtimes.runc.options]
-        SystemdCgroup = true
+        SystemdCgroup = {{ 'true' if kube_do_containerd_systemd_cgroup | bool else 'false' }}
 

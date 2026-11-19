@@ -33,6 +33,21 @@ apiServer:
     - {{ node.name }}
     - {{ node.address }}
 {% endfor %}
+{% if kube_do_kubeadm_apiserver_storage_initialization_timeout or kube_do_kubeadm_apiserver_etcd_healthcheck_timeout or kube_do_kubeadm_apiserver_etcd_readycheck_timeout %}
+  extraArgs:
+{% if kube_do_kubeadm_apiserver_storage_initialization_timeout %}
+    - name: storage-initialization-timeout
+      value: "{{ kube_do_kubeadm_apiserver_storage_initialization_timeout }}"
+{% endif %}
+{% if kube_do_kubeadm_apiserver_etcd_healthcheck_timeout %}
+    - name: etcd-healthcheck-timeout
+      value: "{{ kube_do_kubeadm_apiserver_etcd_healthcheck_timeout }}"
+{% endif %}
+{% if kube_do_kubeadm_apiserver_etcd_readycheck_timeout %}
+    - name: etcd-readycheck-timeout
+      value: "{{ kube_do_kubeadm_apiserver_etcd_readycheck_timeout }}"
+{% endif %}
+{% endif %}
 dns:
   imageRepository: {{ registry_address }}/{{ registry_namespace }}/coredns
   imageTag: {{ kube_do_coredns_image.tag }}
@@ -40,6 +55,21 @@ etcd:
   local:
     imageRepository: {{ registry_address }}/{{ registry_namespace }}
     imageTag: {{ kube_do_etcd_image.tag }}
+{% if kube_do_kubeadm_etcd_heartbeat_interval or kube_do_kubeadm_etcd_election_timeout or kube_do_kubeadm_etcd_unsafe_no_fsync %}
+    extraArgs:
+{% if kube_do_kubeadm_etcd_heartbeat_interval %}
+      - name: heartbeat-interval
+        value: "{{ kube_do_kubeadm_etcd_heartbeat_interval }}"
+{% endif %}
+{% if kube_do_kubeadm_etcd_election_timeout %}
+      - name: election-timeout
+        value: "{{ kube_do_kubeadm_etcd_election_timeout }}"
+{% endif %}
+{% if kube_do_kubeadm_etcd_unsafe_no_fsync %}
+      - name: unsafe-no-fsync
+        value: "true"
+{% endif %}
+{% endif %}
 {% if kube_do_kubeadm_controller_manager_leader_elect_lease_duration %}
 controllerManager:
   extraArgs:
@@ -63,6 +93,11 @@ scheduler:
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
-cgroupDriver: systemd
+cgroupDriver: {{ kube_do_kubelet_cgroup_driver }}
 failSwapOn: true
+runtimeRequestTimeout: {{ kube_do_kubelet_runtime_request_timeout }}
+syncFrequency: {{ kube_do_kubelet_sync_frequency }}
+fileCheckFrequency: {{ kube_do_kubelet_file_check_frequency }}
+nodeStatusUpdateFrequency: {{ kube_do_kubelet_node_status_update_frequency }}
+nodeStatusReportFrequency: {{ kube_do_kubelet_node_status_report_frequency }}
 

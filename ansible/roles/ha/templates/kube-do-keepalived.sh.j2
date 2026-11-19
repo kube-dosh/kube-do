@@ -4,17 +4,22 @@ set -eu
 namespace=kube-do
 container=keepalived
 image={{ kube_do_keepalived_image.target | quote }}
+runtime_dir=/run/containerd/io.containerd.runtime.v2.task/$namespace/$container
 
 mkdir -p /run/keepalived /var/log/kube-do
 
 ctr --namespace "$namespace" task delete --force "$container" >/dev/null 2>&1 || true
 ctr --namespace "$namespace" containers delete "$container" >/dev/null 2>&1 || true
+if ! ctr --namespace "$namespace" tasks list -q 2>/dev/null | grep -Fxq "$container"; then
+  umount -l "$runtime_dir/rootfs" >/dev/null 2>&1 || true
+  rm -rf "$runtime_dir" || true
+fi
 
 ctr --namespace "$namespace" images pull \
   --hosts-dir /etc/containerd/certs.d \
   "$image"
 
-ctr --namespace "$namespace" run --detach \
+exec ctr --namespace "$namespace" run --rm --null-io \
   --log-uri file:///var/log/kube-do/keepalived.log \
   --net-host \
   --with-ns pid:/proc/1/ns/pid \
@@ -27,8 +32,3 @@ ctr --namespace "$namespace" run --detach \
   /usr/local/sbin/keepalived --dont-fork --log-console \
   -f /etc/keepalived/keepalived.conf \
   -p /run/keepalived/keepalived.pid
-
-while ctr --namespace "$namespace" tasks ps "$container" >/dev/null 2>&1; do
-  sleep 2
-done
-exit 1

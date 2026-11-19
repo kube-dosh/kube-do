@@ -4,17 +4,22 @@ set -eu
 namespace=kube-do
 container=haproxy
 image={{ kube_do_haproxy_image.target | quote }}
+runtime_dir=/run/containerd/io.containerd.runtime.v2.task/$namespace/$container
 
 mkdir -p /run/haproxy /var/log/kube-do
 
 ctr --namespace "$namespace" task delete --force "$container" >/dev/null 2>&1 || true
 ctr --namespace "$namespace" containers delete "$container" >/dev/null 2>&1 || true
+if ! ctr --namespace "$namespace" tasks list -q 2>/dev/null | grep -Fxq "$container"; then
+  umount -l "$runtime_dir/rootfs" >/dev/null 2>&1 || true
+  rm -rf "$runtime_dir" || true
+fi
 
 ctr --namespace "$namespace" images pull \
   --hosts-dir /etc/containerd/certs.d \
   "$image"
 
-ctr --namespace "$namespace" run --detach \
+exec ctr --namespace "$namespace" run --rm --null-io \
   --log-uri file:///var/log/kube-do/haproxy.log \
   --rlimit-nofile 1048576:1048576 \
   --net-host \
@@ -25,8 +30,3 @@ ctr --namespace "$namespace" run --detach \
   /usr/local/sbin/haproxy -Ws \
   -f /etc/haproxy/haproxy.cfg \
   -p /run/haproxy/haproxy.pid
-
-while ctr --namespace "$namespace" tasks ps "$container" >/dev/null 2>&1; do
-  sleep 2
-done
-exit 1

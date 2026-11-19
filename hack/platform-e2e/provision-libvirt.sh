@@ -184,7 +184,6 @@ for row in "${NODE_ROWS[@]}"; do
     --memory "$memory_mib"
     --vcpus "$vcpus"
     --import
-    --disk "path=$overlay,format=qcow2,bus=virtio"
     --disk "path=$seed,device=cdrom"
     --network "network=$NET_NAME,model=virtio,mac=$mac"
     --graphics none
@@ -193,6 +192,13 @@ for row in "${NODE_ROWS[@]}"; do
     --wait 0
     --autostart
   )
+  # TCG emulation amplifies every fsync; etcd cannot make progress with the
+  # normal cache mode. Unsafe caching is limited to functional pre-validation.
+  disk_args="path=$overlay,format=qcow2,bus=virtio"
+  if [[ "$SCENARIO_ACCELERATION" == "tcg" ]]; then
+    disk_args+=",cache=unsafe"
+  fi
+  virt_args+=(--disk "$disk_args")
   if [[ "$SCENARIO_ARCH" == "arm64" ]]; then
     virt_args+=(
       --arch aarch64
@@ -208,6 +214,15 @@ for row in "${NODE_ROWS[@]}"; do
   fi
   if [[ -n "$SCENARIO_OS_INFO" ]]; then
     virt_args+=(--osinfo "$SCENARIO_OS_INFO")
+  fi
+  if [[ "$SCENARIO_ACCELERATION" == "tcg" ]]; then
+    # A larger translation block cache materially reduces JIT churn while the
+    # control plane warms up. This is limited to disposable TCG test VMs.
+    virt_args+=(
+      --xml './features/gic/@version=3'
+      --xml './features/tcg/tb-cache=1024'
+      --xml './features/tcg/tb-cache/@unit=MiB'
+    )
   fi
   log "creating $vm_name ($role, $address)"
   virt-install "${virt_args[@]}" >/dev/null

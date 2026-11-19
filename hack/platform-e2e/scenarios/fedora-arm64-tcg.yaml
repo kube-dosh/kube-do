@@ -72,6 +72,12 @@ extraVars:
   kube_do_kubeadm_scheduler_leader_elect_lease_duration: 5m
   kube_do_kubeadm_scheduler_leader_elect_renew_deadline: 4m
   kube_do_kubeadm_scheduler_leader_elect_retry_period: 30s
+  kube_do_kubeadm_apiserver_storage_initialization_timeout: 30m
+  kube_do_kubeadm_apiserver_etcd_healthcheck_timeout: 2m
+  kube_do_kubeadm_apiserver_etcd_readycheck_timeout: 2m
+  kube_do_kubeadm_etcd_heartbeat_interval: 2000
+  kube_do_kubeadm_etcd_election_timeout: 20000
+  kube_do_kubeadm_etcd_unsafe_no_fsync: true
   kube_do_cilium_api_request_timeout: 60s
   kube_do_cilium_api_ready_retries: 360
   kube_do_cilium_api_ready_delay: 10
@@ -96,5 +102,12 @@ extraVars:
   kube_do_ha_systemd_retries: 30
   kube_do_ha_systemd_delay: 10
   kube_do_systemd_daemon_reload: false
+  kube_do_kubeadm_cri_probe_timeout: 2m
+  kube_do_kubeadm_cri_ready_retries: 60
+  kube_do_kubeadm_cri_ready_delay: 5
+  kube_do_kubelet_runtime_request_timeout: 15m
+  kube_do_kubelet_cgroup_driver: cgroupfs
+  kube_do_containerd_systemd_cgroup: false
 kernelArgs:
   - systemd.default_device_timeout_sec=300
+  - ipv6.disable=1

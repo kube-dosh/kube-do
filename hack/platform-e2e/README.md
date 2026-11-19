@@ -44,6 +44,8 @@ hack/platform-e2e/run-scenario.sh --topology minimal \
 - 目标节点只访问安装机的 Download Server `:8080` 和 Registry `:5000`。
 - 宿主机代理可通过 `KUBE_DO_E2E_HOST_PROXY` 指定；默认读取场景中的 `proxy.host`。
 - 安装机代理可使用 `KUBE_DO_E2E_GUEST_PROXY` 覆盖；设置为 `none` 可禁用。默认使用 `<网关>:1080`。
+- 当前代理链路访问 `cdn.registry.k8s.io` 的大层会出现 TLS EOF。测试时可设置 `KUBE_DO_E2E_PRELOAD_IMAGES=1`，由宿主机 Podman 从上游拉取节点镜像并推送到安装机 Registry；安装器只构建 keepalived/HAProxy 镜像，不重复拉取节点镜像。该绕过仅存在于 E2E 工具，不改变生产 `kube-do download` 行为。
+- 宿主机镜像分发默认串行；可设置 `KUBE_DO_E2E_IMAGE_JOBS=4`，为每个架构启动多个独立 Podman 存储并行拉取和推送。镜像已存在且架构匹配时会跳过。
 
 ## 测试专属超时
 
@@ -67,13 +69,17 @@ Fedora Cloud Image 的 `dnf-makecache` 在 TCG 下可能长期占用 CPU 并拖�
 
 Fedora TCG 的 `systemd-logind` 也可能因 D-Bus 超时阻塞新的 SSH session。测试 cloud-init 会仅在该场景停用 `pam_systemd` 的 SSH session 注册，使 Ansible 连接可以建立；目标节点的服务管理仍由 systemd 负责。
 
-Fedora 场景通过 `rpmMirror` 将 Guest 的 `fedora` 与 `updates` RPM 仓库切换到清华 TUNA，并禁用 Cloud Image 自带的上游仓库定义。该配置只存在于临时测试 VM，不改变生产节点。`dl.k8s.io` 和 `cdn.registry.k8s.io` 在本测试代理链路上可能发生 TLS EOF，因此安装机的测试环境将这两个域名及其子域加入 `no_proxy`，直接下载 Kubernetes 二进制和容器层；这不改变生产安装机的代理配置。
+Fedora 场景通过 `rpmMirror` 将 Guest 的 `fedora` 与 `updates` RPM 仓库切换到清华 TUNA，并禁用 Cloud Image 自带的上游仓库定义。该配置只存在于临时测试 VM，不改变生产节点。`dl.k8s.io` 在本测试代理链路上可能发生 TLS EOF，因此安装机的测试环境将该域名及其子域加入 `no_proxy`，直接下载 Kubernetes 二进制；容器镜像则在测试环境中由宿主机预分发。这些处理不改变生产安装机的代理配置。
 
 迭代排查时，可以设置 `KUBE_DO_E2E_INSTALL_TAGS=ha,init,join,cilium,verify`，只重跑安装阶段，不重复已经完成的主机前置配置。该变量仅由测试工具转发，不改变 `kube-do install` 的生产默认值。
 
 若实测 etcd 在 TCG 下出现选举或磁盘超时，应先增加测试场景中的 etcd 时序参数，而不是修改生产默认配置。
 
-TCG 慢速 udev 可能让 systemd 的 device unit 在 cloud-init 启动前超时。场景可通过 `kernelArgs` 给测试 VM 的引导项追加参数：Fedora 修改 BLS 条目，Debian 修改 GRUB 配置。当前两个 arm64 TCG 场景都使用 `systemd.default_device_timeout_sec=300`。该参数只写入本次临时 VM 的 overlay 镜像，不进入生产代码或目标节点配置。
+TCG 会把每次 `fsync` 放大到不可接受的程度，导致 etcd 长时间无法完成 ReadIndex，并连带使 apiserver 在 20 秒硬编码 etcd 拨号窗口内失败。`provision-libvirt.sh` 因此只对 `acceleration: tcg` 的临时 VM 使用 `cache=unsafe`，牺牲掉电持久性换取可完成的功能预验证；原生 KVM 场景仍使用 libvirt 默认缓存策略。
+
+TCG 慢速 udev 可能让 systemd 的 device unit 在 cloud-init 启动前超时。场景可通过 `kernelArgs` 给测试 VM 的引导项追加参数：Fedora 修改 BLS 条目，Debian 修改 GRUB 配置。当前两个 arm64 TCG 场景都使用 `systemd.default_device_timeout_sec=300`，并禁用 IPv6，避免 apiserver 的 loopback 启动 Hook 长时间卡在 `[::1]:6443`。这些参数只写入本次临时 VM 的 overlay 镜像，不进入生产代码或目标节点配置。
+
+TCG 场景还会为 QEMU 配置 1 GiB translation block cache（`tb-cache`），降低控制面启动期间的 JIT 抖动。该设置只由 `provision-libvirt.sh` 应用于 `acceleration: tcg` 的临时 VM，原生 KVM 场景不受影响。
 
 ## 清理与恢复
 

@@ -4,6 +4,21 @@
     kube_do_etcd_image: "{{ images | selectattr('name', 'equalto', 'etcd') | first }}"
     kube_do_coredns_image: "{{ images | selectattr('name', 'equalto', 'coredns') | first }}"
 
+- name: Wait for the container runtime CRI endpoint
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/timeout
+      - "{{ kube_do_kubeadm_cri_probe_timeout }}"
+      - /usr/local/bin/crictl
+      - --runtime-endpoint
+      - unix:///run/containerd/containerd.sock
+      - info
+  register: kube_do_kubeadm_cri_ready
+  changed_when: false
+  retries: "{{ kube_do_kubeadm_cri_ready_retries }}"
+  delay: "{{ kube_do_kubeadm_cri_ready_delay }}"
+  until: kube_do_kubeadm_cri_ready.rc == 0
+
 - name: Check whether this control-plane node is initialized
   ansible.builtin.stat:
     path: /etc/kubernetes/admin.conf

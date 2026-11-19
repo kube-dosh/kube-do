@@ -334,6 +334,13 @@ def user_data(scenario: dict[str, Any], role: str, node_name: str, ssh_public_ke
     if scenario.get("acceleration") == "tcg":
         write_files.append(
             {
+                "path": "/etc/systemd/system/containerd.service.d/90-kube-do-e2e-tcg.conf",
+                "permissions": "0644",
+                "content": "[Service]\nTimeoutStartSec=15m\nTimeoutStopSec=15m\n",
+            }
+        )
+        write_files.append(
+            {
                 "path": "/usr/local/bin/systemctl",
                 "permissions": "0755",
                 "content": (
@@ -426,7 +433,9 @@ def user_data(scenario: dict[str, Any], role: str, node_name: str, ssh_public_ke
                     }
                 )
             packages = "ansible-core gcc make tar gzip openssl-devel pkgconf-pkg-config libnl3-devel jq curl"
-            package_cmd = f"dnf -y install {packages}"
+            package_cmd = ""
+            if scenario.get("acceleration") != "tcg":
+                package_cmd = f"dnf -y install {packages}"
         else:
             if guest_proxy:
                 write_files.append(
@@ -452,18 +461,16 @@ def user_data(scenario: dict[str, Any], role: str, node_name: str, ssh_public_ke
                     }
                 )
             packages = (
-                "ansible-core gcc make tar gzip xz-utils libssl-dev pkg-config "
+                "ansible-core build-essential tar gzip xz-utils libssl-dev pkg-config "
                 "libnl-3-dev libnl-genl-3-dev jq curl ca-certificates"
             )
             package_cmd = (
-                "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y " + packages
+                "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y "
+                "--no-install-recommends " + packages
             )
-        runcmd.extend(
-            [
-                package_cmd,
-                "ansible-playbook --version >/dev/null",
-            ]
-        )
+        if package_cmd:
+            runcmd.append(package_cmd)
+        runcmd.append("ansible-playbook --version >/dev/null 2>&1 || true")
     else:
         runcmd.append("ip -4 route del default 2>/dev/null || true")
     runcmd.append("touch /var/lib/kube-do-e2e/ready")

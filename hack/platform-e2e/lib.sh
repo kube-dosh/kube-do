@@ -93,14 +93,14 @@ ssh_options() {
 vm_ssh() {
   local address=$1
   shift
-  ssh "${SSH_OPTIONS[@]}" "root@$address" "$@"
+  ssh -n "${SSH_OPTIONS[@]}" "root@$address" "$@"
 }
 
 vm_scp() {
   local source=$1
   local address=$2
   local destination=$3
-  scp -q "${SSH_OPTIONS[@]}" "$source" "root@$address:$destination"
+  scp -q "${SSH_OPTIONS[@]}" "$source" "root@$address:$destination" </dev/null
 }
 
 wait_for_ssh() {
