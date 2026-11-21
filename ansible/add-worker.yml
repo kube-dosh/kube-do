@@ -12,6 +12,21 @@
       delay: 5
       until: kubeadm_join_command.rc == 0
 
+    - name: Remove stale Node objects for workers that are joining
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - delete
+          - node
+          - "{{ item }}"
+          - --ignore-not-found
+          - --timeout=5m
+      loop: "{{ groups['new_workers'] }}"
+      changed_when: false
+      register: kube_do_stale_worker_node
+
 - name: Prepare new workers
   hosts: new_workers
   gather_facts: true

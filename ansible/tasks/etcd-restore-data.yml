@@ -1,0 +1,106 @@
+---
+# Restores one etcd data directory from an already-uploaded snapshot. The
+# caller must stop kubelet before including this task file.
+- name: Resolve the etcd image
+  ansible.builtin.set_fact:
+    kube_do_etcd_restore_image: "{{ images | selectattr('name', 'equalto', 'etcd') | first }}"
+
+- name: Validate etcd restore inputs
+  ansible.builtin.assert:
+    that:
+      - kube_do_etcd_restore_snapshot is defined
+      - kube_do_etcd_restore_snapshot is match('^/')
+      - kube_do_etcd_restore_initial_cluster is defined
+      - kube_do_etcd_restore_initial_cluster | length > 0
+      - kube_do_etcd_restore_timestamp is defined
+    fail_msg: "etcd restore inputs are incomplete"
+
+- name: Stop kubelet before replacing the etcd data directory
+  ansible.builtin.systemd:
+    name: kubelet
+    state: stopped
+
+- name: Force stop any remaining etcd containers
+  ansible.builtin.shell: |
+    for id in $(/usr/local/bin/crictl ps -q --name etcd); do
+      /usr/local/bin/crictl stop -t 10 "$id" >/dev/null 2>&1 || true
+      /usr/local/bin/crictl rm -f "$id" >/dev/null 2>&1 || true
+    done
+  changed_when: false
+
+- name: Wait for static control-plane containers to stop
+  ansible.builtin.command: /usr/local/bin/crictl ps --name etcd --quiet
+  register: kube_do_etcd_restore_containers
+  changed_when: false
+  retries: 60
+  delay: 2
+  until: kube_do_etcd_restore_containers.stdout | trim == ''
+
+- name: Pull the etcd image for etcdutl
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/ctr
+      - --namespace
+      - k8s.io
+      - images
+      - pull
+      - --hosts-dir
+      - /etc/containerd/certs.d
+      - "{{ kube_do_etcd_restore_image.target }}"
+  changed_when: false
+
+- name: Remove any previous etcd restore staging directory
+  ansible.builtin.file:
+    path: /var/lib/etcd.restore
+    state: absent
+
+- name: Create the etcd restore staging directory
+  ansible.builtin.file:
+    path: /var/lib/etcd.restore
+    state: directory
+    mode: '0700'
+
+- name: Restore the snapshot into a staging data directory
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/ctr
+      - --namespace
+      - k8s.io
+      - run
+      - --rm
+      - --mount
+      - "type=bind,src={{ kube_do_etcd_restore_snapshot }},dst={{ kube_do_etcd_restore_snapshot }},options=rbind:ro"
+      - --mount
+      - type=bind,src=/var/lib/etcd.restore,dst=/var/lib/etcd.restore,options=rbind
+      - "{{ kube_do_etcd_restore_image.target }}"
+      - kube-do-etcd-restore
+      - /usr/local/bin/etcdutl
+      - snapshot
+      - restore
+      - "{{ kube_do_etcd_restore_snapshot }}"
+      - --name
+      - "{{ inventory_hostname }}"
+      - --initial-cluster
+      - "{{ kube_do_etcd_restore_initial_cluster }}"
+      - --initial-cluster-token
+      - etcd-cluster
+      - --initial-advertise-peer-urls
+      - "https://{{ kube_do_node_ip }}:2380"
+      - --data-dir
+      - /var/lib/etcd.restore
+
+- name: Preserve the previous etcd data directory
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /var/lib/etcd
+      - "/var/lib/etcd.pre-restore.{{ kube_do_etcd_restore_timestamp }}"
+  failed_when: false
+
+- name: Install the restored etcd data directory
+  ansible.builtin.command:
+    argv:
+      - mv
+      - /var/lib/etcd.restore
+      - /var/lib/etcd
+

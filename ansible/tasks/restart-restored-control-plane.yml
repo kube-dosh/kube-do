@@ -1,0 +1,33 @@
+---
+- name: Restart static control-plane containers after restoring cluster state
+  ansible.builtin.shell: |
+    set -eu
+    for name in kube-apiserver kube-controller-manager kube-scheduler; do
+      for id in $(/usr/local/bin/crictl ps -q --name "$name"); do
+        /usr/local/bin/crictl stop -t 30 "$id" >/dev/null 2>&1 || true
+      done
+    done
+  changed_when: true
+
+- name: Wait for kubelet to recreate the static API server
+  ansible.builtin.command: /usr/local/bin/crictl ps --quiet --name kube-apiserver
+  register: kube_do_restored_apiserver
+  changed_when: false
+  retries: 60
+  delay: 2
+  until: kube_do_restored_apiserver.stdout | trim != ''
+
+- name: Wait for the Kubernetes API after restarting the static containers
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --request-timeout=10s
+      - get
+      - --raw=/readyz
+  register: kube_do_restored_cp_readyz
+  changed_when: false
+  retries: 120
+  delay: 5
+  until: kube_do_restored_cp_readyz.rc == 0

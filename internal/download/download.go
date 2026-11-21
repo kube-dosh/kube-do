@@ -27,6 +27,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 
 	"github.com/kube-dosh/kube-do/internal/archive"
@@ -484,6 +485,18 @@ func copyRemoteImage(source, target, wantDigest string, opts Options, remoteOpts
 	dst, err := parseRef(target, opts.Insecure)
 	if err != nil {
 		return fmt.Errorf("parse target: %w", err)
+	}
+	existing, err := remote.Get(dst, remoteOpts...)
+	if err == nil {
+		if wantDigest != "" && existing.Digest.String() != wantDigest {
+			return fmt.Errorf("existing target digest %s does not match pinned digest %s", existing.Digest, wantDigest)
+		}
+		logf(opts, "reuse  %s", dst)
+		return nil
+	}
+	var transportErr *transport.Error
+	if !errors.As(err, &transportErr) || transportErr.StatusCode != http.StatusNotFound {
+		return fmt.Errorf("inspect target %s: %w", dst, err)
 	}
 	logf(opts, "mirror %s -> %s", src, dst)
 	imageOpts := append(append([]remote.Option{}, remoteOpts...), remote.WithPlatform(v1.Platform{OS: opts.OS, Architecture: opts.Arch}))

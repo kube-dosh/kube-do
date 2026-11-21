@@ -14,7 +14,7 @@ kube-do is an opinionated, air-gapped Kubernetes installer for RHEL-family and D
 The project is designed for isolated data centers, regulated environments, edge sites, and lab platforms where repeatability and explicit dependency control matter more than access to the latest upstream packages.
 
 > [!WARNING]
-> kube-do is under active development and is **not production-ready**. It supports fresh installations and worker-only incremental node addition through the daemon API. Upgrades, control-plane scaling, node removal, registry authentication, and long-running production validation are out of scope for the current release. Evaluate it in a disposable or non-critical environment first.
+> kube-do is under active development and is **not production-ready**. It now includes fresh installation, worker and control-plane scale-out, node removal, cluster uninstall, in-place upgrade/rollback, and etcd restore workflows. The lifecycle operations are guarded by explicit confirmation and pre-change snapshots, but destructive paths still require disposable-environment validation. Evaluate it in a non-critical environment first.
 
 ## Contents
 
@@ -358,8 +358,15 @@ The registry does not implement authentication or RBAC. Anyone who can reach por
 | `kube-do serve` | Serve cached artifacts over HTTP |
 | `kube-do render` | Generate the Ansible inventory and group variables |
 | `kube-do install` | Run the Ansible installation |
-| `kube-do daemon` | Run the cluster management HTTP API with asynchronous install, worker addition, backup, certificate checks, cancellation, and persistent job history |
+| `kube-do daemon` | Run the cluster management HTTP API with asynchronous lifecycle operations, backups, certificate checks, cancellation, and persistent job history |
+| `kube-do node add` | Add workers or control-plane nodes, with an automatic etcd snapshot for control-plane scale-out |
+| `kube-do node remove` | Drain, reset, and remove a worker or control-plane node |
+| `kube-do cluster uninstall` | Reset Kubernetes state on every node while preserving registry data and snapshots |
+| `kube-do upgrade plan` | Validate an in-place Build and Kubernetes version transition |
+| `kube-do upgrade apply` | Upgrade control planes and workers one at a time with a pre-upgrade snapshot |
+| `kube-do upgrade rollback` | Restore the previous Build configuration and its pre-upgrade etcd snapshot |
 | `kube-do etcd backup` | Save an etcd snapshot from the first control-plane node and fetch it to the Installer Host |
+| `kube-do etcd restore` | Restore every control-plane etcd member from a validated snapshot |
 | `kube-do certs check` | Check Kubernetes certificate expiration on every control-plane node |
 | `kube-do manifest bump` | Create a new Resource Manifest from explicit component versions |
 
@@ -381,6 +388,8 @@ Use `kube-do <command> --help` for the complete flag set. See [docs/api.md](docs
 | `verify` | Wait for nodes, Cilium, CoreDNS, and Hubble Relay to become ready |
 
 The Cilium stage uses `helm --atomic --wait` and cleans up pending or failed Helm releases before retrying. The installer does not reboot nodes automatically; SELinux persistence may require a maintenance reboot after installation.
+
+Lifecycle operations use dedicated playbooks: `add-control-plane.yml`, `remove-node.yml`, `upgrade.yml`, `rollback.yml`, `ops-etcd-restore.yml`, and `uninstall.yml`. Control-plane scale-out and node removal take an etcd snapshot first, roll HAProxy/keepalived configuration across compatible control-plane nodes, and persist `cluster.yaml` only after success. Upgrades accept patch releases and a single minor-version step, upgrade one node at a time, and retain a rollback archive under `/var/backups/kube-do/rollback/`. Rollback and etcd restore do not restore application data written after the selected snapshot.
 
 ## Builds and release artifacts
 
@@ -472,6 +481,7 @@ Validated scenarios include:
 - Fresh Debian 13 `amd64` air-gapped installation with the same topology.
 - Digest-pinned prebuilt HAProxy and keepalived image mirroring on Debian 13 `amd64`, including source/destination digest verification, HA container startup, and VIP API readiness without local HA compilation.
 - Daemon API normal-path E2E on both new installations: authentication, cluster registration, duplicate/unsupported requests, same-cluster job conflict, etcd backup with `etcdutl` validation and checksum verification, structured certificate checks, task cancellation semantics, and job history recovery after daemon restart.
+- Multi-node lifecycle drill on Debian 13 `amd64`: fresh installation, etcd backup, API-driven worker removal, etcd restore from snapshot, control-plane scale-out, in-place upgrade from `v1.36.5` to `v1.36.6` and rollback, a second etcd restore, and final API-driven uninstall.
 
 Still unvalidated:
 
@@ -479,7 +489,7 @@ Still unvalidated:
 - End-to-end installation of Ubuntu 22.04/24.04 and all `arm64` targets.
 - Arbitrary installer/target glibc ABI combinations.
 - Long-running stability, abrupt power-loss recovery, and every interrupted-installation recovery path.
-- etcd restore drills, certificate renewal, upgrades, rollbacks, control-plane scaling, node removal, network partitions, and multi-OS/architecture API E2E.
+- End-to-end lifecycle drills on RHEL-family distributions. Current multi-node lifecycle validation is limited to Debian 13 `amd64`.
 
 The automated tests cover configuration parsing, manifest validation, archive extraction safety, downloads, registry handling, rendering, installation command construction, job lifecycle and persistence, certificate output parsing, and backup metadata validation. The real API harness is documented in [docs/e2e.md](docs/e2e.md).
 
@@ -499,9 +509,9 @@ Use a dedicated management network, restrict access to ports `8080` and `5000`, 
 
 ## Known limitations
 
-- No in-place Kubernetes upgrades or Build rollback.
-- No control-plane scaling, node removal, or cluster uninstall workflow.
-- etcd backup and certificate inspection are supported, but automated etcd restore and certificate renewal are not.
+- Lifecycle workflows exist but have not yet completed full multi-node E2E validation.
+- Rollback is a state rollback to a pre-upgrade snapshot and previous Build; it cannot preserve writes made after that snapshot.
+- Certificate renewal remains inspection-only.
 - API jobs are not resumed after a daemon restart; running jobs are marked interrupted.
 - Certificates missing on joined control-plane nodes are reported but not classified as an error automatically.
 - No registry authentication, RBAC, web UI, or replication.

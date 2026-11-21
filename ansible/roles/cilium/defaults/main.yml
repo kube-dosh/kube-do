@@ -11,3 +11,5 @@ kube_do_cilium_install_timeout: 15m
 kube_do_cilium_install_retries: 0
 kube_do_cilium_install_retry_delay: 10
 kube_do_cilium_rollout_timeout: 10m
+kube_do_cilium_rollout_retries: 120
+kube_do_cilium_rollout_delay: 5

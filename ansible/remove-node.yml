@@ -1,0 +1,228 @@
+---
+- name: Remove the node from Kubernetes and etcd
+  hosts: remaining_control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    kube_do_remaining_control_plane_nodes: >-
+      {{ dict(groups['remaining_control_plane'] | zip(groups['remaining_control_plane'] | map('extract', hostvars) | map(attribute='kube_do_node_ip'))) | dict2items(key_name='name', value_name='address') }}
+  tasks:
+    - name: Validate the removal target
+      ansible.builtin.assert:
+        that:
+          - kube_do_remove_node_name is defined
+          - kube_do_remove_node_role in ['worker', 'control-plane']
+          - kube_do_remove_node_role != 'control-plane' or kube_do_remaining_control_plane_nodes | length > 0
+        fail_msg: "invalid node removal request"
+
+    - name: Drain workloads from the target node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - drain
+          - "{{ kube_do_remove_node_name }}"
+          - --ignore-daemonsets
+          - --delete-emptydir-data
+          - --force
+          - --timeout=20m
+      register: kube_do_drain_node
+      retries: 3
+      delay: 10
+      until: kube_do_drain_node.rc == 0
+      failed_when: >-
+        kube_do_drain_node.rc != 0 and
+        'not found' not in (kube_do_drain_node.stderr | default(''))
+
+    - name: Delete the node object
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - delete
+          - node
+          - "{{ kube_do_remove_node_name }}"
+          - --ignore-not-found
+          - --timeout=5m
+      changed_when: true
+
+    - name: Inspect the etcd member list before removal
+      block:
+        - name: Find the local etcd static pod
+          ansible.builtin.command:
+            argv:
+              - /usr/local/bin/kubectl
+              - --kubeconfig
+              - /etc/kubernetes/admin.conf
+              - --namespace
+              - kube-system
+              - get
+              - pods
+              - --selector=component=etcd,tier=control-plane
+              - --output=jsonpath={.items[0].metadata.name}
+          register: kube_do_remove_etcd_pod
+          changed_when: false
+
+        - name: Read the etcd member list
+          ansible.builtin.command:
+            argv:
+              - /usr/local/bin/kubectl
+              - --kubeconfig
+              - /etc/kubernetes/admin.conf
+              - --namespace
+              - kube-system
+              - exec
+              - "{{ kube_do_remove_etcd_pod.stdout | trim }}"
+              - --
+              - /usr/local/bin/etcdctl
+              - --endpoints=https://127.0.0.1:2379
+              - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+              - --cert=/etc/kubernetes/pki/etcd/server.crt
+              - --key=/etc/kubernetes/pki/etcd/server.key
+              - member
+              - list
+              - --write-out=json
+          register: kube_do_remove_member_list
+          changed_when: false
+
+        - name: Resolve the etcd member to remove
+          ansible.builtin.set_fact:
+            kube_do_remove_etcd_members: "{{ ((kube_do_remove_member_list.stdout | from_json).members | selectattr('name', 'equalto', kube_do_remove_node_name) | list) }}"
+
+        - name: Assert that the target is an etcd member
+          ansible.builtin.assert:
+            that:
+              - kube_do_remove_etcd_members | length == 1
+            fail_msg: "control-plane node {{ kube_do_remove_node_name }} is not an etcd member"
+
+        - name: Remove the etcd member
+          ansible.builtin.command:
+            argv:
+              - /usr/local/bin/kubectl
+              - --kubeconfig
+              - /etc/kubernetes/admin.conf
+              - --namespace
+              - kube-system
+              - exec
+              - "{{ kube_do_remove_etcd_pod.stdout | trim }}"
+              - --
+              - /usr/local/bin/etcdctl
+              - --endpoints=https://127.0.0.1:2379
+              - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+              - --cert=/etc/kubernetes/pki/etcd/server.crt
+              - --key=/etc/kubernetes/pki/etcd/server.key
+              - member
+              - remove
+              - "{{ '%x' | format((kube_do_remove_etcd_members | first).ID | int) }}"
+          when: kube_do_remove_node_role == 'control-plane'
+      when: kube_do_remove_node_role == 'control-plane'
+
+- name: Reset the removed node
+  hosts: remove_nodes
+  gather_facts: false
+  ignore_unreachable: true
+  any_errors_fatal: true
+  tasks:
+    - name: Stop the control-plane HA containers
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - kube-do-haproxy.service
+        - kube-do-keepalived.service
+      failed_when: false
+      when: kube_do_remove_node_role == 'control-plane'
+
+    - name: Stop kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Reset the node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - reset
+          - --force
+          - --cri-socket
+          - unix:///run/containerd/containerd.sock
+      register: kube_do_reset_node
+      changed_when: true
+      failed_when: false
+
+    - name: Remove Kubernetes state from the node
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /etc/cni/net.d
+        - /root/.kube
+
+    - name: Remove the removed control-plane etcd data
+      ansible.builtin.file:
+        path: /var/lib/etcd
+        state: absent
+      when: kube_do_remove_node_role == 'control-plane'
+
+- name: Roll the API load balancer configuration on surviving control-plane nodes
+  hosts: remaining_control_plane
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    control_plane_nodes: >-
+      {{ dict(groups['remaining_control_plane'] | zip(groups['remaining_control_plane'] | map('extract', hostvars) | map(attribute='kube_do_node_ip'))) | dict2items(key_name='name', value_name='address') }}
+  tasks:
+    - name: Reconfigure HA on the surviving control-plane nodes
+      ansible.builtin.include_role:
+        name: ha
+      when: kube_do_remove_node_role == 'control-plane'
+
+- name: Verify the cluster after node removal
+  hosts: remaining_control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Wait for the Kubernetes API after node removal
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - --request-timeout=10s
+          - get
+          - --raw=/readyz
+      register: kube_do_remove_readyz
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: kube_do_remove_readyz.rc == 0
+
+    - name: Assert that the removed node no longer exists
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - get
+          - "node/{{ kube_do_remove_node_name }}"
+          - --ignore-not-found
+          - --output=name
+      register: kube_do_removed_node_lookup
+      changed_when: false
+
+    - name: Verify the node object is gone
+      ansible.builtin.assert:
+        that:
+          - kube_do_removed_node_lookup.stdout | trim == ''
+        fail_msg: "node {{ kube_do_remove_node_name }} still exists"
+
+    - name: Verify every remaining etcd member is healthy
+      ansible.builtin.include_tasks: tasks/etcd-endpoint-health.yml

@@ -74,6 +74,7 @@ done
 [[ "$TOPOLOGY" == "full" || "$TOPOLOGY" == "minimal" ]] || die "--topology must be full or minimal"
 export KUBE_DO_E2E_TOPOLOGY=$TOPOLOGY
 SCENARIO_FILE=$(realpath "$SCENARIO_FILE")
+REQUESTED_SCENARIO_FILE=$SCENARIO_FILE
 load_scenario "$SCENARIO_FILE"
 load_nodes "$SCENARIO_FILE"
 
@@ -122,6 +123,9 @@ fi
 [[ -f "$WORK_ROOT/libvirt/state.env" ]] || die "missing libvirt state; provision the scenario first"
 # shellcheck disable=SC1091
 source "$WORK_ROOT/libvirt/state.env"
+# A reused work root carries the scenario path recorded by its original run.
+# Keep the scenario explicitly passed on this invocation authoritative.
+SCENARIO_FILE=$REQUESTED_SCENARIO_FILE
 SSH_KEY=${SSH_KEY:-$WORK_ROOT/ssh/id_ed25519}
 ssh_options
 [[ -f "$SSH_KEY" ]] || die "SSH key not found: $SSH_KEY"
@@ -378,8 +382,15 @@ if [[ "$RUN_DAEMON" == "1" ]]; then
     cert_wait_seconds=2700
   fi
   set +e
+  lifecycle_env=""
+  for name in KUBE_DO_E2E_NEW_CONTROL_PLANES KUBE_DO_E2E_REMOVE_NODE KUBE_DO_E2E_UPGRADE_BUILD KUBE_DO_E2E_ROLLBACK_BUILD KUBE_DO_E2E_ROLLBACK_SNAPSHOT KUBE_DO_E2E_RESTORE_SNAPSHOT KUBE_DO_E2E_RUN_RESTORE KUBE_DO_E2E_RUN_UNINSTALL KUBE_DO_E2E_NEW_WORKERS KUBE_DO_E2E_UPGRADE_PREPARE KUBE_DO_E2E_UPGRADE_CHECK KUBE_DO_E2E_ROLLBACK_PREPARE; do
+    if [[ -n "${!name:-}" ]]; then
+      lifecycle_env+=" $(printf '%s=%q' "$name" "${!name}")"
+    fi
+  done
   ssh "${SSH_OPTIONS[@]}" "root@$INSTALLER_IP" \
-    "KUBE_DO_E2E_CONFIG=/opt/kube-do/cluster.yaml \
+    "set -a; . /opt/kube-do/platform.env; set +a; \
+     KUBE_DO_E2E_CONFIG=/opt/kube-do/cluster.yaml \
      KUBE_DO_E2E_BIN=/opt/kube-do/kube-do \
      KUBE_DO_E2E_ANSIBLE_DIR=/opt/kube-do/ansible \
      KUBE_DO_E2E_WORK_DIR=$daemon_work_dir \
@@ -390,6 +401,7 @@ if [[ "$RUN_DAEMON" == "1" ]]; then
      KUBE_DO_E2E_BACKUP_WAIT_SECONDS=$backup_wait_seconds \
      KUBE_DO_E2E_CERT_WAIT_SECONDS=$cert_wait_seconds \
      KUBE_DO_E2E_RUN_OPS=1 \
+     $lifecycle_env \
      /opt/kube-do/hack/e2e-daemon.sh" 2>&1 | tee "$DAEMON_LOG"
   daemon_status=${PIPESTATUS[0]}
   set -e

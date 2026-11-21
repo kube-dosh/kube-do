@@ -1,0 +1,76 @@
+---
+- name: Remove Kubernetes state from every node
+  hosts: k8s_cluster
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Validate the uninstall request
+      ansible.builtin.assert:
+        that:
+          - kube_do_uninstall_confirm | default(false) | bool
+        fail_msg: "cluster uninstall requires explicit confirmation"
+
+    - name: Stop HA containers on control-plane nodes
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - kube-do-haproxy.service
+        - kube-do-keepalived.service
+      failed_when: false
+      when: inventory_hostname in groups['control_plane']
+
+    - name: Stop kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        state: stopped
+        enabled: false
+      failed_when: false
+
+    - name: Reset Kubernetes state
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - reset
+          - --force
+          - --cri-socket
+          - unix:///run/containerd/containerd.sock
+      register: kube_do_uninstall_reset
+      changed_when: true
+      failed_when: false
+
+    - name: Remove Kubernetes and HA configuration
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /etc/cni/net.d
+        - /etc/haproxy
+        - /etc/keepalived
+        - /root/.kube
+        - /etc/systemd/system/kube-do-haproxy.service
+        - /etc/systemd/system/kube-do-keepalived.service
+
+    - name: Remove control-plane etcd data
+      ansible.builtin.file:
+        path: /var/lib/etcd
+        state: absent
+      when: inventory_hostname in groups['control_plane']
+
+    - name: Reload systemd after removing HA units
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+- name: Confirm that the local Registry and artifact cache were preserved
+  hosts: installer
+  gather_facts: false
+  tasks:
+    - name: Report preserved host data
+      ansible.builtin.debug:
+        msg:
+          - "etcd snapshots under the daemon data directory were preserved"
+          - "Registry data under registry.dataDir was preserved"
+          - "Artifact cache under the Installer Host cache directory was preserved"

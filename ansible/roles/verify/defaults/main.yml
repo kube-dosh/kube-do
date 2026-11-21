@@ -2,4 +2,8 @@
 kube_do_node_ready_timeout: 10m
 kube_do_cilium_operator_rollout_timeout: 10m
 kube_do_coredns_rollout_timeout: 10m
+kube_do_coredns_rollout_retries: 120
+kube_do_coredns_rollout_delay: 5
 kube_do_hubble_rollout_timeout: 10m
+kube_do_hubble_rollout_retries: 120
+kube_do_hubble_rollout_delay: 5

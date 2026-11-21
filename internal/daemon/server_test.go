@@ -19,12 +19,18 @@ import (
 )
 
 type fakeExecutor struct {
-	mu           sync.Mutex
-	installed    bool
-	added        []cluster.Node
-	backedUp     bool
-	checkedCerts bool
-	certBlock    chan struct{}
+	mu               sync.Mutex
+	installed        bool
+	added            []cluster.Node
+	controlPlanes    []cluster.Node
+	removedNode      string
+	upgradedTo       string
+	rolledBackTo     string
+	restoredSnapshot string
+	uninstalled      bool
+	backedUp         bool
+	checkedCerts     bool
+	certBlock        chan struct{}
 }
 
 func (f *fakeExecutor) Install(_ context.Context, cfg *cluster.Config, _ InstallRequest, _ string, log io.Writer) error {
@@ -41,6 +47,54 @@ func (f *fakeExecutor) AddWorkers(_ context.Context, _ *cluster.Config, newWorke
 	f.added = append(f.added, newWorkers...)
 	fmt.Fprintf(log, "added %d workers\n", len(newWorkers))
 	return nil
+}
+
+func (f *fakeExecutor) AddControlPlanes(_ context.Context, _ *cluster.Config, newNodes []cluster.Node, _, _ string, log io.Writer) (ops.BackupResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.controlPlanes = append(f.controlPlanes, newNodes...)
+	fmt.Fprintf(log, "added %d control-plane nodes\n", len(newNodes))
+	return ops.BackupResult{Validated: true}, nil
+}
+
+func (f *fakeExecutor) RemoveNode(_ context.Context, cfg *cluster.Config, nodeName, role, _, _ string, log io.Writer) (ops.RemoveNodeResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removedNode = nodeName
+	fmt.Fprintf(log, "removed %s %s\n", role, nodeName)
+	return ops.RemoveNodeResult{Cluster: cfg.Metadata.Name, Node: nodeName, Role: role}, nil
+}
+
+func (f *fakeExecutor) Upgrade(_ context.Context, cfg *cluster.Config, req UpgradeRequest, _, _ string, log io.Writer) (ops.UpgradeResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.upgradedTo = req.TargetBuild
+	fmt.Fprintf(log, "upgraded %s to %s\n", cfg.Metadata.Name, req.TargetBuild)
+	return ops.UpgradeResult{Cluster: cfg.Metadata.Name, ToBuild: req.TargetBuild}, nil
+}
+
+func (f *fakeExecutor) Rollback(_ context.Context, cfg *cluster.Config, req RollbackRequest, _, _ string, log io.Writer) (ops.RollbackResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rolledBackTo = req.TargetBuild
+	fmt.Fprintf(log, "rolled back %s to %s\n", cfg.Metadata.Name, req.TargetBuild)
+	return ops.RollbackResult{Cluster: cfg.Metadata.Name, ToBuild: req.TargetBuild}, nil
+}
+
+func (f *fakeExecutor) RestoreEtcd(_ context.Context, cfg *cluster.Config, req EtcdRestoreRequest, _, _ string, log io.Writer) (ops.RestoreResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restoredSnapshot = req.SnapshotPath
+	fmt.Fprintf(log, "restored %s from %s\n", cfg.Metadata.Name, req.SnapshotPath)
+	return ops.RestoreResult{Cluster: cfg.Metadata.Name, SnapshotPath: req.SnapshotPath}, nil
+}
+
+func (f *fakeExecutor) Uninstall(_ context.Context, cfg *cluster.Config, _ UninstallRequest, _ string, log io.Writer) (ops.UninstallResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uninstalled = true
+	fmt.Fprintf(log, "uninstalled %s\n", cfg.Metadata.Name)
+	return ops.UninstallResult{Cluster: cfg.Metadata.Name}, nil
 }
 
 func (f *fakeExecutor) BackupEtcd(_ context.Context, cfg *cluster.Config, _, backupDir string, _ ops.BackupOptions, log io.Writer) (ops.BackupResult, error) {
@@ -297,23 +351,149 @@ func TestCancelRunningJobAPI(t *testing.T) {
 	}
 }
 
-func TestAddNodesRejectsUnsupportedRoleAndDuplicates(t *testing.T) {
-	_, _, httpServer := newTestServer(t, "")
+func TestAddNodesSupportsControlPlaneAndRejectsDuplicates(t *testing.T) {
+	_, executor, httpServer := newTestServer(t, "")
 	base := httpServer.URL
 	resp := request(t, http.MethodPost, base+"/api/v1/clusters", "", []byte(testClusterYAML))
 	resp.Body.Close()
 
 	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/nodes", "", []byte(`{"role":"control-plane","nodes":[{"name":"cp-2","address":"10.0.0.12"}]}`))
-	if resp.StatusCode != http.StatusBadRequest {
+	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("control-plane add status = %d", resp.StatusCode)
 	}
-	resp.Body.Close()
+	job := waitJob(t, base, decode[Job](t, resp).ID)
+	if job.Status != JobSucceeded {
+		t.Fatalf("control-plane add job = %#v", job)
+	}
+	executor.mu.Lock()
+	if len(executor.controlPlanes) != 1 || executor.controlPlanes[0].Name != "cp-2" {
+		t.Fatalf("control-plane executor calls = %#v", executor.controlPlanes)
+	}
+	executor.mu.Unlock()
 
 	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/nodes", "", []byte(`{"nodes":[{"name":"worker-1","address":"10.0.0.30"}]}`))
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("duplicate add status = %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestLifecycleOperationAPIs(t *testing.T) {
+	srv, executor, httpServer := newTestServer(t, "")
+	base := httpServer.URL
+	resp := request(t, http.MethodPost, base+"/api/v1/clusters", "", []byte(testClusterYAML))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/upgrade", "", []byte(`{"targetBuild":"test-build-2","prepare":false,"check":false}`))
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("upgrade status = %d", resp.StatusCode)
+	}
+	job := waitJob(t, base, decode[Job](t, resp).ID)
+	if job.Status != JobSucceeded {
+		t.Fatalf("upgrade job = %#v", job)
+	}
+	cfg, err := srv.store.Load("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Build != "test-build-2" {
+		t.Fatalf("build after upgrade = %q", cfg.Build)
+	}
+
+	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/upgrade/rollback", "", []byte(`{"targetBuild":"test-build","snapshotPath":"/var/lib/kube-do/backups/test.db","confirm":true,"prepare":false}`))
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("rollback status = %d", resp.StatusCode)
+	}
+	job = waitJob(t, base, decode[Job](t, resp).ID)
+	if job.Status != JobSucceeded {
+		t.Fatalf("rollback job = %#v", job)
+	}
+	cfg, err = srv.store.Load("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Build != "test-build" {
+		t.Fatalf("build after rollback = %q", cfg.Build)
+	}
+
+	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/etcd-restores", "", []byte(`{"snapshotPath":"/var/lib/kube-do/backups/test.db","confirm":true}`))
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("etcd restore status = %d", resp.StatusCode)
+	}
+	job = waitJob(t, base, decode[Job](t, resp).ID)
+	if job.Status != JobSucceeded {
+		t.Fatalf("etcd restore job = %#v", job)
+	}
+
+	resp = request(t, http.MethodDelete, base+"/api/v1/clusters/test/nodes/worker-1?confirm=true", "", nil)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("remove worker status = %d", resp.StatusCode)
+	}
+	job = waitJob(t, base, decode[Job](t, resp).ID)
+	if job.Status != JobSucceeded {
+		t.Fatalf("remove worker job = %#v", job)
+	}
+	cfg, err = srv.store.Load("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Workers) != 0 {
+		t.Fatalf("workers after removal = %#v", cfg.Workers)
+	}
+
+	resp = request(t, http.MethodDelete, base+"/api/v1/clusters/test/nodes/cp-1?confirm=true", "", nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("remove last control-plane status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp = request(t, http.MethodPost, base+"/api/v1/clusters/test/uninstall", "", []byte(`{"confirm":true}`))
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("uninstall status = %d", resp.StatusCode)
+	}
+	job = waitJob(t, base, decode[Job](t, resp).ID)
+	if job.Status != JobSucceeded {
+		t.Fatalf("uninstall job = %#v", job)
+	}
+	resp = request(t, http.MethodGet, base+"/api/v1/clusters/test", "", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cluster after uninstall status = %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	executor.mu.Lock()
+	if executor.upgradedTo != "test-build-2" || executor.rolledBackTo != "test-build" || executor.restoredSnapshot == "" || executor.removedNode != "worker-1" || !executor.uninstalled {
+		t.Fatalf("executor lifecycle calls = %#v", executor)
+	}
+	executor.mu.Unlock()
+}
+
+func TestLifecycleOperationsRequireConfirmation(t *testing.T) {
+	_, _, httpServer := newTestServer(t, "")
+	base := httpServer.URL
+	resp := request(t, http.MethodPost, base+"/api/v1/clusters", "", []byte(testClusterYAML))
+	resp.Body.Close()
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{"rollback", http.MethodPost, "/api/v1/clusters/test/upgrade/rollback", `{"targetBuild":"test-build","snapshotPath":"/tmp/snapshot.db"}`},
+		{"restore", http.MethodPost, "/api/v1/clusters/test/etcd-restores", `{"snapshotPath":"/tmp/snapshot.db"}`},
+		{"uninstall", http.MethodPost, "/api/v1/clusters/test/uninstall", `{}`},
+		{"remove", http.MethodDelete, "/api/v1/clusters/test/nodes/worker-1", ``},
+	} {
+		resp := request(t, tc.method, base+tc.path, "", []byte(tc.body))
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s confirmation status = %d", tc.name, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
 }
 
 func TestAPIToken(t *testing.T) {

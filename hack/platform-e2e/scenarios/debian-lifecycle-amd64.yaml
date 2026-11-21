@@ -1,0 +1,64 @@
+---
+name: debian-lifecycle-amd64
+description: Debian 13 lifecycle validation on native amd64 KVM with three control planes and two workers.
+os: debian
+osInfo: debian13
+version: "13"
+arch: amd64
+acceleration: kvm
+firmware: bios
+image:
+  url: https://cloud.debian.org/images/cloud/trixie/20261111-2659/debian-13-genericcloud-amd64-20261111-2659.qcow2
+  sha256: e2d95cfb631bf38e30017c32653c2536b8d95447d4083040faffd147942ab9e9
+network:
+  name: kubedo-e2e-lifecycle
+  bridge: virbr125
+  cidr: 192.168.125.0/24
+  gateway: 192.168.125.1
+  dns:
+    - 1.1.1.1
+proxy:
+  host: http://127.0.0.1:1080
+  guestPort: 1080
+cluster:
+  name: platform-debian-lifecycle
+  build: v1.36.5-kube-do.1
+  vip: 192.168.125.50
+  apiPort: 16443
+  vrrp:
+    routerId: 125
+    password: debian
+installer:
+  name: installer
+  address: 192.168.125.10
+  vcpus: 2
+  memoryMiB: 4096
+  diskGiB: 40
+controlPlane:
+  - name: cp-1
+    address: 192.168.125.100
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+  - name: cp-2
+    address: 192.168.125.101
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+  - name: cp-3
+    address: 192.168.125.103
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+workers:
+  - name: worker-1
+    address: 192.168.125.200
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+  - name: worker-2
+    address: 192.168.125.201
+    vcpus: 2
+    memoryMiB: 4096
+    diskGiB: 24
+extraVars: {}

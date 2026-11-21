@@ -1,0 +1,246 @@
+---
+- name: Validate the upgrade source
+  hosts: control_plane[0]
+  gather_facts: true
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Read the currently installed kubeadm version
+      ansible.builtin.command: /usr/local/bin/kubeadm version -o short
+      register: kube_do_current_kubeadm_version
+      changed_when: false
+
+    - name: Assert that the installed control plane matches the source Build
+      ansible.builtin.assert:
+        that:
+          - kube_do_current_kubeadm_version.stdout | trim == kube_do_upgrade_from_kubernetes_version
+        fail_msg: >-
+          installed kubeadm is {{ kube_do_current_kubeadm_version.stdout | trim }},
+          but cluster.yaml pins {{ kube_do_upgrade_from_kubernetes_version }}
+
+    - name: Wait for the Kubernetes API before upgrading
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - --request-timeout=10s
+          - get
+          - --raw=/readyz
+      register: kube_do_upgrade_api_ready
+      changed_when: false
+      retries: 60
+      delay: 5
+      until: kube_do_upgrade_api_ready.rc == 0
+
+- name: Capture rollback state and install target binaries
+  hosts: k8s_cluster
+  gather_facts: true
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Create the rollback archive directory
+      ansible.builtin.file:
+        path: /var/backups/kube-do/rollback
+        state: directory
+        mode: '0700'
+
+    - name: Inspect the existing rollback archive
+      ansible.builtin.stat:
+        path: "/var/backups/kube-do/rollback/{{ kube_do_upgrade_from_build }}.tar.gz"
+      register: kube_do_rollback_archive
+
+    - name: Archive control-plane configuration for rollback
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/tar
+          - -czf
+          - "/var/backups/kube-do/rollback/{{ kube_do_upgrade_from_build }}.tar.gz"
+          - -C
+          - /
+          - etc/kubernetes
+          - var/lib/kubelet/config.yaml
+          - etc/systemd/system/kubelet.service
+      when: not kube_do_rollback_archive.stat.exists
+  roles:
+    - role: containerd
+      tags: [containerd]
+    - role: kubernetes
+      tags: [kubernetes]
+
+- name: Upgrade the first control-plane node
+  hosts: control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Drain the first control-plane node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - drain
+          - "{{ inventory_hostname }}"
+          - --ignore-daemonsets
+          - --delete-emptydir-data
+          - --force
+          - --timeout=20m
+      when: groups['control_plane'] | length > 1
+
+    - name: Upgrade the first control plane
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - upgrade
+          - apply
+          - "{{ kubernetes_version }}"
+          - --yes
+          - --certificate-renewal=false
+          - --skip-phases=addon/kube-proxy
+
+    - name: Restart kubelet on the first control-plane node
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    - name: Uncordon the first control-plane node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - uncordon
+          - "{{ inventory_hostname }}"
+
+    - name: Wait for the upgraded first control-plane node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - wait
+          - --for=condition=Ready
+          - "node/{{ inventory_hostname }}"
+          - --timeout=15m
+      changed_when: false
+
+- name: Upgrade remaining control-plane nodes one at a time
+  hosts: control_plane[1:]
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Drain the control-plane node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - drain
+          - "{{ inventory_hostname }}"
+          - --ignore-daemonsets
+          - --delete-emptydir-data
+          - --force
+          - --timeout=20m
+
+    - name: Upgrade the control-plane node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - upgrade
+          - node
+
+    - name: Restart kubelet on the control-plane node
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    - name: Uncordon the control-plane node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - uncordon
+          - "{{ inventory_hostname }}"
+
+    - name: Wait for the upgraded control-plane node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - wait
+          - --for=condition=Ready
+          - "node/{{ inventory_hostname }}"
+          - --timeout=15m
+      changed_when: false
+
+- name: Upgrade workers one at a time
+  hosts: workers
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Drain the worker node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - drain
+          - "{{ inventory_hostname }}"
+          - --ignore-daemonsets
+          - --delete-emptydir-data
+          - --force
+          - --timeout=20m
+      delegate_to: "{{ groups['control_plane'][0] }}"
+
+    - name: Upgrade the worker node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - upgrade
+          - node
+
+    - name: Restart kubelet on the worker node
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    - name: Uncordon the worker node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - uncordon
+          - "{{ inventory_hostname }}"
+      delegate_to: "{{ groups['control_plane'][0] }}"
+
+    - name: Wait for the upgraded worker node
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - wait
+          - --for=condition=Ready
+          - "node/{{ inventory_hostname }}"
+          - --timeout=15m
+      changed_when: false
+      delegate_to: "{{ groups['control_plane'][0] }}"
+
+- name: Upgrade Cilium and verify the cluster
+  hosts: control_plane[0]
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Verify every etcd member is healthy after upgrade
+      ansible.builtin.include_tasks: tasks/etcd-endpoint-health.yml
+  roles:
+    - role: cilium
+      tags: [cilium]
+    - role: verify
+      tags: [verify]

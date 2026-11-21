@@ -46,7 +46,27 @@ BACKUP_TIMEOUT=${KUBE_DO_E2E_BACKUP_TIMEOUT:-10m}
 CERT_TIMEOUT=${KUBE_DO_E2E_CERT_TIMEOUT:-5m}
 BACKUP_WAIT_SECONDS=${KUBE_DO_E2E_BACKUP_WAIT_SECONDS:-900}
 CERT_WAIT_SECONDS=${KUBE_DO_E2E_CERT_WAIT_SECONDS:-600}
+NEW_CONTROL_PLANES=${KUBE_DO_E2E_NEW_CONTROL_PLANES:-}
+REMOVE_NODE=${KUBE_DO_E2E_REMOVE_NODE:-}
+UPGRADE_BUILD=${KUBE_DO_E2E_UPGRADE_BUILD:-}
+ROLLBACK_BUILD=${KUBE_DO_E2E_ROLLBACK_BUILD:-}
+ROLLBACK_SNAPSHOT=${KUBE_DO_E2E_ROLLBACK_SNAPSHOT:-}
+RESTORE_SNAPSHOT=${KUBE_DO_E2E_RESTORE_SNAPSHOT:-}
+RUN_RESTORE=${KUBE_DO_E2E_RUN_RESTORE:-0}
+RUN_UNINSTALL=${KUBE_DO_E2E_RUN_UNINSTALL:-0}
+UPGRADE_PREPARE=${KUBE_DO_E2E_UPGRADE_PREPARE:-true}
+UPGRADE_CHECK=${KUBE_DO_E2E_UPGRADE_CHECK:-true}
+ROLLBACK_PREPARE=${KUBE_DO_E2E_ROLLBACK_PREPARE:-true}
 PID=""
+
+if [[ -n "${KUBE_DO_E2E_GUEST_PROXY:-}" ]]; then
+  export http_proxy=$KUBE_DO_E2E_GUEST_PROXY
+  export https_proxy=$KUBE_DO_E2E_GUEST_PROXY
+  export HTTP_PROXY=$KUBE_DO_E2E_GUEST_PROXY
+  export HTTPS_PROXY=$KUBE_DO_E2E_GUEST_PROXY
+fi
+export no_proxy="127.0.0.1,localhost,${KUBE_DO_E2E_NETWORK_CIDR:-}"
+export NO_PROXY=$no_proxy
 
 mkdir -p "$WORK_ROOT" "$DATA_DIR" "$CACHE_DIR"
 
@@ -205,7 +225,16 @@ expect_status 200
 # shellcheck disable=SC2016
 jq_assert --arg cluster "$CLUSTER" '.name == $cluster'
 
-api_call POST "/api/v1/clusters/$CLUSTER/nodes" -H 'Content-Type: application/json' --data '{"role":"control-plane","nodes":[{"name":"e2e-cp","address":"192.0.2.10"}]}'
+api_call POST "/api/v1/clusters/$CLUSTER/nodes" -H 'Content-Type: application/json' --data '{"role":"unsupported","nodes":[{"name":"e2e-cp","address":"192.0.2.10"}]}'
+expect_status 400
+
+api_call DELETE "/api/v1/clusters/$CLUSTER/nodes/e2e-worker"
+expect_status 400
+api_call POST "/api/v1/clusters/$CLUSTER/etcd-restores" -H 'Content-Type: application/json' --data '{"snapshotPath":"/tmp/missing.db"}'
+expect_status 400
+api_call POST "/api/v1/clusters/$CLUSTER/upgrade/rollback" -H 'Content-Type: application/json' --data '{"targetBuild":"old","snapshotPath":"/tmp/missing.db"}'
+expect_status 400
+api_call POST "/api/v1/clusters/$CLUSTER/uninstall" -H 'Content-Type: application/json' --data '{}'
 expect_status 400
 
 if [[ "$RUN_OPS" == "1" ]]; then
@@ -267,6 +296,83 @@ if [[ "$RUN_OPS" == "1" ]]; then
     expect_status 200
     [[ -s "$RESPONSE" ]] || fail "persisted log for job $job is empty"
   done
+fi
+
+if [[ -n "$REMOVE_NODE" ]]; then
+  echo "removing node $REMOVE_NODE through the API"
+  api_call DELETE "/api/v1/clusters/$CLUSTER/nodes/$REMOVE_NODE?confirm=true"
+  expect_status 202
+  REMOVE_JOB=$(jq -r '.id' "$RESPONSE")
+  wait_job "$REMOVE_JOB" 1800
+fi
+
+if [[ "$RUN_RESTORE" == "1" ]]; then
+  if [[ -z "$RESTORE_SNAPSHOT" ]]; then
+    [[ -n "${BACKUP_PATH:-}" ]] || fail "RUN_RESTORE=1 requires a backup created by this E2E run"
+    RESTORE_SNAPSHOT=$BACKUP_PATH
+  fi
+  echo "restoring etcd from $RESTORE_SNAPSHOT"
+  api_call POST "/api/v1/clusters/$CLUSTER/etcd-restores" -H 'Content-Type: application/json' \
+    --data "$(jq -nc --arg path "$RESTORE_SNAPSHOT" '{snapshotPath:$path,confirm:true}')"
+  expect_status 202
+  RESTORE_JOB=$(jq -r '.id' "$RESPONSE")
+  wait_job "$RESTORE_JOB" 3600
+  api_call POST "/api/v1/clusters/$CLUSTER/certs/check"
+  expect_status 202
+  RESTORE_VERIFY_JOB=$(jq -r '.id' "$RESPONSE")
+  wait_job "$RESTORE_VERIFY_JOB" 900
+fi
+
+if [[ -n "$NEW_CONTROL_PLANES" ]]; then
+  echo "adding control-plane nodes through the API"
+  api_call POST "/api/v1/clusters/$CLUSTER/nodes" -H 'Content-Type: application/json' \
+    --data "{\"role\":\"control-plane\",\"nodes\":$NEW_CONTROL_PLANES}"
+  expect_status 202
+  ADD_CONTROL_PLANE_JOB=$(jq -r '.id' "$RESPONSE")
+  wait_job "$ADD_CONTROL_PLANE_JOB" 3600
+  api_call GET "/api/v1/clusters/$CLUSTER"
+  expect_status 200
+  jq_assert --argjson count "$(jq 'length' <<<"$NEW_CONTROL_PLANES")" '.controlPlane | length >= ($count + 1)'
+fi
+
+if [[ -n "$UPGRADE_BUILD" ]]; then
+  echo "upgrading cluster to build $UPGRADE_BUILD through the API"
+  api_call POST "/api/v1/clusters/$CLUSTER/upgrade" -H 'Content-Type: application/json' \
+    --data "$(jq -nc --arg build "$UPGRADE_BUILD" --argjson prepare "$UPGRADE_PREPARE" --argjson check "$UPGRADE_CHECK" '{targetBuild:$build,prepare:$prepare,check:$check}')"
+  expect_status 202
+  UPGRADE_JOB=$(jq -r '.id' "$RESPONSE")
+  wait_job "$UPGRADE_JOB" 7200
+  api_call GET "/api/v1/jobs/$UPGRADE_JOB"
+  expect_status 200
+  UPGRADE_SNAPSHOT=$(jq -r '.result.preUpgradeBackup.path // empty' "$RESPONSE")
+  api_call GET "/api/v1/clusters/$CLUSTER"
+  expect_status 200
+  jq_assert --arg build "$UPGRADE_BUILD" '.build == $build'
+fi
+
+if [[ -n "$ROLLBACK_BUILD" ]]; then
+  [[ -n "$ROLLBACK_SNAPSHOT" ]] || ROLLBACK_SNAPSHOT=${UPGRADE_SNAPSHOT:-}
+  [[ -n "$ROLLBACK_SNAPSHOT" ]] || ROLLBACK_SNAPSHOT=${RESTORE_SNAPSHOT:-}
+  [[ -n "$ROLLBACK_SNAPSHOT" ]] || fail "ROLLBACK_BUILD requires a pre-upgrade snapshot or KUBE_DO_E2E_ROLLBACK_SNAPSHOT"
+  echo "rolling the cluster back to build $ROLLBACK_BUILD through the API"
+  api_call POST "/api/v1/clusters/$CLUSTER/upgrade/rollback" -H 'Content-Type: application/json' \
+    --data "$(jq -nc --arg build "$ROLLBACK_BUILD" --arg path "$ROLLBACK_SNAPSHOT" --argjson prepare "$ROLLBACK_PREPARE" '{targetBuild:$build,snapshotPath:$path,confirm:true,prepare:$prepare}')"
+  expect_status 202
+  ROLLBACK_JOB=$(jq -r '.id' "$RESPONSE")
+  wait_job "$ROLLBACK_JOB" 7200
+  api_call GET "/api/v1/clusters/$CLUSTER"
+  expect_status 200
+  jq_assert --arg build "$ROLLBACK_BUILD" '.build == $build'
+fi
+
+if [[ "$RUN_UNINSTALL" == "1" ]]; then
+  echo "uninstalling the cluster through the API"
+  api_call POST "/api/v1/clusters/$CLUSTER/uninstall" -H 'Content-Type: application/json' --data '{"confirm":true}'
+  expect_status 202
+  UNINSTALL_JOB=$(jq -r '.id' "$RESPONSE")
+  wait_job "$UNINSTALL_JOB" 3600
+  api_call GET "/api/v1/clusters/$CLUSTER"
+  expect_status 404
 fi
 
 if [[ -n "${KUBE_DO_E2E_NEW_WORKERS:-}" ]]; then

@@ -107,6 +107,7 @@ func (m *JobManager) Start(kind, clusterName string, nodes []Node, run func(cont
 		Status:     JobQueued,
 		CreatedAt:  time.Now().UTC(),
 		NewWorkers: append([]Node(nil), nodes...),
+		Nodes:      append([]Node(nil), nodes...),
 	}}
 	m.jobs[id] = rec
 	m.active[clusterName] = id

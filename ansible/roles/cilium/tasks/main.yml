@@ -268,6 +268,11 @@
       - rollout
       - status
       - daemonset/cilium
+      - --watch=false
       - "--timeout={{ kube_do_cilium_rollout_timeout }}"
+  register: kube_do_cilium_rollout
   changed_when: false
+  retries: "{{ kube_do_cilium_rollout_retries }}"
+  delay: "{{ kube_do_cilium_rollout_delay }}"
+  until: kube_do_cilium_rollout.rc == 0
 

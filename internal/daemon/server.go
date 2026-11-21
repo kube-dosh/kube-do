@@ -143,7 +143,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/clusters/{name}", s.handleGetCluster)
 	mux.HandleFunc("POST /api/v1/clusters/{name}/install", s.handleInstallCluster)
 	mux.HandleFunc("POST /api/v1/clusters/{name}/nodes", s.handleAddNodes)
+	mux.HandleFunc("DELETE /api/v1/clusters/{name}/nodes/{node}", s.handleRemoveNode)
+	mux.HandleFunc("POST /api/v1/clusters/{name}/uninstall", s.handleUninstallCluster)
+	mux.HandleFunc("POST /api/v1/clusters/{name}/upgrade", s.handleUpgradeCluster)
+	mux.HandleFunc("POST /api/v1/clusters/{name}/upgrade/rollback", s.handleRollbackCluster)
 	mux.HandleFunc("POST /api/v1/clusters/{name}/etcd-backups", s.handleEtcdBackup)
+	mux.HandleFunc("POST /api/v1/clusters/{name}/etcd-restores", s.handleRestoreEtcd)
 	mux.HandleFunc("POST /api/v1/clusters/{name}/certs/check", s.handleCheckCerts)
 	mux.HandleFunc("GET /api/v1/jobs", s.handleListJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleGetJob)
@@ -291,8 +296,8 @@ func (s *Server) handleAddNodes(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "worker"
 	}
-	if role != "worker" {
-		writeError(w, http.StatusBadRequest, "only role=worker is supported for incremental node addition")
+	if role != "worker" && role != "control-plane" {
+		writeError(w, http.StatusBadRequest, "role must be worker or control-plane")
 		return
 	}
 	if len(req.Nodes) == 0 {
@@ -300,28 +305,262 @@ func (s *Server) handleAddNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newWorkers := make([]cluster.Node, 0, len(req.Nodes))
+	newNodes := make([]cluster.Node, 0, len(req.Nodes))
 	apiNodes := make([]Node, 0, len(req.Nodes))
 	for _, node := range req.Nodes {
-		newWorkers = append(newWorkers, cluster.Node{Name: node.Name, Address: node.Address})
+		newNodes = append(newNodes, cluster.Node{Name: node.Name, Address: node.Address})
 		apiNodes = append(apiNodes, Node{Name: node.Name, Address: node.Address})
 	}
 	updated := *cfg
-	updated.Workers = append(append([]cluster.Node(nil), cfg.Workers...), newWorkers...)
+	if role == "control-plane" {
+		updated.ControlPlane.Nodes = append(append([]cluster.Node(nil), cfg.ControlPlane.Nodes...), newNodes...)
+	} else {
+		updated.Workers = append(append([]cluster.Node(nil), cfg.Workers...), newNodes...)
+	}
 	if err := updated.Validate(); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	job, err := s.jobs.Start("add-workers", name, apiNodes, func(ctx context.Context, id string, log io.Writer) error {
+	kind := "add-workers"
+	if role == "control-plane" {
+		kind = "add-control-plane"
+	}
+	backupDir := filepath.Join(s.opts.DataDir, "backups", name)
+	job, err := s.jobs.Start(kind, name, apiNodes, func(ctx context.Context, id string, log io.Writer) error {
 		workDir, err := ensureWorkDir(s.opts.DataDir, id)
 		if err != nil {
 			return err
 		}
-		if err := s.opts.Executor.AddWorkers(ctx, &updated, newWorkers, workDir, log); err != nil {
-			return err
+		if role == "control-plane" {
+			if _, err := s.opts.Executor.AddControlPlanes(ctx, &updated, newNodes, workDir, backupDir, log); err != nil {
+				return err
+			}
+		} else {
+			if err := s.opts.Executor.AddWorkers(ctx, &updated, newNodes, workDir, log); err != nil {
+				return err
+			}
 		}
 		return s.store.Save(&updated)
+	})
+	if errors.Is(err, ErrClusterBusy) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleRemoveNode(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cfg, err := s.store.Load(name)
+	if errors.Is(err, ErrClusterNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if r.URL.Query().Get("confirm") != "true" {
+		writeError(w, http.StatusBadRequest, "node removal requires confirm=true")
+		return
+	}
+	nodeName := r.PathValue("node")
+	role := ""
+	if _, ok := nodeByName(cfg.ControlPlane.Nodes, nodeName); ok {
+		role = "control-plane"
+	} else if _, ok := nodeByName(cfg.Workers, nodeName); ok {
+		role = "worker"
+	} else {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("node %q not found", nodeName))
+		return
+	}
+	if role == "control-plane" && len(cfg.ControlPlane.Nodes) <= 1 {
+		writeError(w, http.StatusConflict, "refusing to remove the last control-plane node")
+		return
+	}
+	backupDir := filepath.Join(s.opts.DataDir, "backups", name)
+	job, err := s.jobs.Start("remove-node", name, []Node{{Name: nodeName}}, func(ctx context.Context, id string, log io.Writer) error {
+		workDir, err := ensureWorkDir(s.opts.DataDir, id)
+		if err != nil {
+			return err
+		}
+		result, err := s.opts.Executor.RemoveNode(ctx, cfg, nodeName, role, workDir, backupDir, log)
+		if err != nil {
+			return err
+		}
+		updated := *cfg
+		if role == "control-plane" {
+			updated.ControlPlane.Nodes = removeNode(cfg.ControlPlane.Nodes, nodeName)
+		} else {
+			updated.Workers = removeNode(cfg.Workers, nodeName)
+		}
+		if err := s.store.Save(&updated); err != nil {
+			return err
+		}
+		s.jobs.SetResult(id, result)
+		return nil
+	})
+	if errors.Is(err, ErrClusterBusy) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleUninstallCluster(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cfg, err := s.store.Load(name)
+	if errors.Is(err, ErrClusterNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var req UninstallRequest
+	if err := decodeOptionalJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !req.Confirm {
+		writeError(w, http.StatusBadRequest, "cluster uninstall requires confirm=true")
+		return
+	}
+	job, err := s.jobs.Start("uninstall", name, nil, func(ctx context.Context, id string, log io.Writer) error {
+		workDir, err := ensureWorkDir(s.opts.DataDir, id)
+		if err != nil {
+			return err
+		}
+		result, err := s.opts.Executor.Uninstall(ctx, cfg, req, workDir, log)
+		if err != nil {
+			return err
+		}
+		if !req.KeepCluster {
+			if err := s.store.Delete(name); err != nil {
+				return err
+			}
+		}
+		s.jobs.SetResult(id, result)
+		return nil
+	})
+	if errors.Is(err, ErrClusterBusy) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleUpgradeCluster(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cfg, err := s.store.Load(name)
+	if errors.Is(err, ErrClusterNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var req UpgradeRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.TargetBuild = strings.TrimSpace(req.TargetBuild)
+	if req.TargetBuild == "" {
+		writeError(w, http.StatusBadRequest, "targetBuild is required")
+		return
+	}
+	if req.TargetBuild == cfg.Build {
+		writeError(w, http.StatusConflict, fmt.Sprintf("cluster already uses build %q", cfg.Build))
+		return
+	}
+	backupDir := filepath.Join(s.opts.DataDir, "backups", name)
+	job, err := s.jobs.Start("upgrade", name, nil, func(ctx context.Context, id string, log io.Writer) error {
+		workDir, err := ensureWorkDir(s.opts.DataDir, id)
+		if err != nil {
+			return err
+		}
+		result, err := s.opts.Executor.Upgrade(ctx, cfg, req, workDir, backupDir, log)
+		if err != nil {
+			return err
+		}
+		updated := *cfg
+		updated.Build = req.TargetBuild
+		if err := s.store.Save(&updated); err != nil {
+			return err
+		}
+		s.jobs.SetResult(id, result)
+		return nil
+	})
+	if errors.Is(err, ErrClusterBusy) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleRollbackCluster(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cfg, err := s.store.Load(name)
+	if errors.Is(err, ErrClusterNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var req RollbackRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.TargetBuild = strings.TrimSpace(req.TargetBuild)
+	req.SnapshotPath = strings.TrimSpace(req.SnapshotPath)
+	if req.TargetBuild == "" || req.SnapshotPath == "" {
+		writeError(w, http.StatusBadRequest, "targetBuild and snapshotPath are required")
+		return
+	}
+	if !req.Confirm {
+		writeError(w, http.StatusBadRequest, "upgrade rollback requires confirm=true")
+		return
+	}
+	backupDir := filepath.Join(s.opts.DataDir, "backups", name)
+	job, err := s.jobs.Start("upgrade-rollback", name, nil, func(ctx context.Context, id string, log io.Writer) error {
+		workDir, err := ensureWorkDir(s.opts.DataDir, id)
+		if err != nil {
+			return err
+		}
+		result, err := s.opts.Executor.Rollback(ctx, cfg, req, workDir, backupDir, log)
+		if err != nil {
+			return err
+		}
+		updated := *cfg
+		updated.Build = req.TargetBuild
+		if err := s.store.Save(&updated); err != nil {
+			return err
+		}
+		s.jobs.SetResult(id, result)
+		return nil
 	})
 	if errors.Is(err, ErrClusterBusy) {
 		writeError(w, http.StatusConflict, err.Error())
@@ -352,6 +591,56 @@ func (s *Server) handleEtcdBackup(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		result, err := s.opts.Executor.BackupEtcd(ctx, cfg, workDir, backupDir, s.opts.BackupOptions, log)
+		if err != nil {
+			return err
+		}
+		s.jobs.SetResult(id, result)
+		return nil
+	})
+	if errors.Is(err, ErrClusterBusy) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (s *Server) handleRestoreEtcd(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	cfg, err := s.store.Load(name)
+	if errors.Is(err, ErrClusterNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var req EtcdRestoreRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.SnapshotPath = strings.TrimSpace(req.SnapshotPath)
+	req.TargetNode = strings.TrimSpace(req.TargetNode)
+	if req.SnapshotPath == "" {
+		writeError(w, http.StatusBadRequest, "snapshotPath is required")
+		return
+	}
+	if !req.Confirm {
+		writeError(w, http.StatusBadRequest, "etcd restore requires confirm=true")
+		return
+	}
+	backupDir := filepath.Join(s.opts.DataDir, "backups", name)
+	job, err := s.jobs.Start("etcd-restore", name, nil, func(ctx context.Context, id string, log io.Writer) error {
+		workDir, err := ensureWorkDir(s.opts.DataDir, id)
+		if err != nil {
+			return err
+		}
+		result, err := s.opts.Executor.RestoreEtcd(ctx, cfg, req, workDir, backupDir, log)
 		if err != nil {
 			return err
 		}
@@ -468,6 +757,25 @@ func clusterDetail(cfg *cluster.Config) (ClusterDetail, error) {
 		ControlPlane: toNodeViews(cfg.ControlPlane.Nodes, "control-plane"),
 		Workers:      toNodeViews(cfg.Workers, "worker"),
 	}, nil
+}
+
+func nodeByName(nodes []cluster.Node, name string) (cluster.Node, bool) {
+	for _, node := range nodes {
+		if node.Name == name {
+			return node, true
+		}
+	}
+	return cluster.Node{}, false
+}
+
+func removeNode(nodes []cluster.Node, name string) []cluster.Node {
+	out := make([]cluster.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.Name != name {
+			out = append(out, node)
+		}
+	}
+	return out
 }
 
 func decodeOptionalJSON(r io.Reader, value any) error {

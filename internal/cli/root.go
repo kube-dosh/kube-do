@@ -24,6 +24,9 @@ func NewRootCmd() *cobra.Command {
 		newEtcdCmd(),
 		newCertsCmd(),
 		newManifestCmd(),
+		newNodeCmd(),
+		newUpgradeCmd(),
+		newClusterCmd(),
 	)
 	return cmd
 }

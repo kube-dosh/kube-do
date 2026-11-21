@@ -1,0 +1,97 @@
+---
+- name: Wait for all restored nodes to become Ready
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - wait
+      - --for=condition=Ready
+      - nodes
+      - --all
+      - "--timeout={{ kube_do_node_ready_timeout | default('10m') }}"
+  changed_when: false
+
+- name: Restart Cilium agents after restoring cluster state
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - rollout
+      - restart
+      - daemonset/cilium
+  changed_when: true
+
+- name: Wait for Cilium agents after restoring cluster state
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - rollout
+      - status
+      - daemonset/cilium
+      - --watch=false
+      - "--timeout={{ kube_do_cilium_rollout_timeout | default('10m') }}"
+  register: kube_do_restored_cilium_rollout
+  changed_when: false
+  retries: "{{ kube_do_cilium_rollout_retries | default(120) }}"
+  delay: "{{ kube_do_cilium_rollout_delay | default(5) }}"
+  until: kube_do_restored_cilium_rollout.rc == 0
+
+- name: Restart CoreDNS and Hubble relay after restoring cluster state
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - rollout
+      - restart
+      - deployment/coredns
+      - deployment/hubble-relay
+  changed_when: true
+
+- name: Wait for CoreDNS after restoring cluster state
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - rollout
+      - status
+      - deployment/coredns
+      - --watch=false
+      - "--timeout={{ kube_do_coredns_rollout_timeout | default('10m') }}"
+  register: kube_do_restored_coredns_rollout
+  changed_when: false
+  retries: "{{ kube_do_coredns_rollout_retries | default(120) }}"
+  delay: "{{ kube_do_coredns_rollout_delay | default(5) }}"
+  until: kube_do_restored_coredns_rollout.rc == 0
+
+- name: Wait for Hubble relay after restoring cluster state
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - rollout
+      - status
+      - deployment/hubble-relay
+      - --watch=false
+      - "--timeout={{ kube_do_hubble_rollout_timeout | default('10m') }}"
+  register: kube_do_restored_hubble_rollout
+  changed_when: false
+  retries: "{{ kube_do_hubble_rollout_retries | default(120) }}"
+  delay: "{{ kube_do_hubble_rollout_delay | default(5) }}"
+  until: kube_do_restored_hubble_rollout.rc == 0

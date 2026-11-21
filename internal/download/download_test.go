@@ -512,6 +512,69 @@ func TestRunMirrorsPrebuiltInstallerImage(t *testing.T) {
 	}
 }
 
+func TestRunReusesExistingTargetWithoutReachingSource(t *testing.T) {
+	dstSrv := httptest.NewServer(registry.New())
+	defer dstSrv.Close()
+	dstHost := strings.TrimPrefix(dstSrv.URL, "http://")
+
+	dstRef, err := name.ParseReference(dstHost+"/kube-do/cached:v1", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(dstRef, image); err != nil {
+		t.Fatalf("seed target registry: %v", err)
+	}
+
+	m := testManifest(nil, nil)
+	m.Spec.Images = []manifest.Image{{
+		Name: "cached", Source: "127.0.0.1:1/unreachable:v1", Target: "cached:v1",
+	}}
+	sum, err := Run(context.Background(), Options{
+		CacheDir: t.TempDir(), RegistryAddress: dstHost, Manifest: m, ImagesOnly: true, Insecure: true,
+	})
+	if err != nil {
+		t.Fatalf("Run reused existing target: %v", err)
+	}
+	if sum.Mirrored != 1 {
+		t.Fatalf("summary = %+v", sum)
+	}
+}
+
+func TestRunRejectsExistingTargetWithWrongPinnedDigest(t *testing.T) {
+	dstSrv := httptest.NewServer(registry.New())
+	defer dstSrv.Close()
+	dstHost := strings.TrimPrefix(dstSrv.URL, "http://")
+
+	dstRef, err := name.ParseReference(dstHost+"/kube-do/cached:v1", name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := random.Image(1024, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.Write(dstRef, image); err != nil {
+		t.Fatalf("seed target registry: %v", err)
+	}
+
+	m := testManifest(nil, nil)
+	m.Spec.Installer.Images = []manifest.InstallerImage{{
+		Name: "cached", Version: "v1", OS: "linux", Arch: "amd64",
+		Source: "127.0.0.1:1/unreachable:v1", Digest: "sha256:" + strings.Repeat("0", 64),
+		Target: "cached:v1",
+	}}
+	_, err = Run(context.Background(), Options{
+		CacheDir: t.TempDir(), RegistryAddress: dstHost, Manifest: m, ImagesOnly: true, Insecure: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "existing target digest") {
+		t.Fatalf("expected existing target digest mismatch, got %v", err)
+	}
+}
+
 func TestRunRejectsPrebuiltInstallerImageDigestMismatch(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("fixture targets linux/amd64")

@@ -1,0 +1,148 @@
+---
+- name: Read bootstrap data from the existing cluster
+  hosts: control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Create a join command
+      ansible.builtin.command: /usr/local/bin/kubeadm token create --print-join-command
+      register: kubeadm_join_command
+      changed_when: false
+      retries: 3
+      delay: 5
+      until: kubeadm_join_command.rc == 0
+
+    - name: Upload control-plane certificates with a fresh key
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubeadm
+          - init
+          - phase
+          - upload-certs
+          - --upload-certs
+          - --config
+          - /etc/kubernetes/kubeadm-config.yaml
+      register: kube_do_upload_certs
+      changed_when: false
+      retries: 3
+      delay: 5
+      until: kube_do_upload_certs.rc == 0
+
+    - name: Record the certificate key for control-plane joins
+      ansible.builtin.set_fact:
+        kubeadm_certificate_key: "{{ kube_do_upload_certs.stdout_lines | last | trim }}"
+
+    - name: Remove stale Node objects for control-plane nodes that are joining
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - delete
+          - node
+          - "{{ item }}"
+          - --ignore-not-found
+          - --timeout=5m
+      loop: "{{ groups['new_control_plane'] }}"
+      changed_when: false
+      register: kube_do_stale_control_plane_node
+
+- name: Prepare new control-plane nodes
+  hosts: new_control_plane
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: prerequisites
+      tags: [prerequisites]
+    - role: containerd
+      tags: [containerd]
+    - role: kubernetes
+      tags: [kubernetes]
+
+- name: Join new control-plane nodes
+  hosts: new_control_plane
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: kubeadm_join
+      vars:
+        join_control_plane: true
+      tags: [join, join-control-plane]
+
+- name: Roll the API load balancer configuration across all control-plane nodes
+  hosts: control_plane
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  roles:
+    - role: ha
+      tags: [ha]
+
+- name: Verify etcd membership and node readiness
+  hosts: control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    kube_do_add_control_plane_ready_timeout: 15m
+  tasks:
+    - name: Find the local etcd static pod
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - --namespace
+          - kube-system
+          - get
+          - pods
+          - --selector=component=etcd,tier=control-plane
+          - --output=jsonpath={.items[0].metadata.name}
+      register: kube_do_etcd_pod
+      changed_when: false
+
+    - name: Read the etcd member list
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - --namespace
+          - kube-system
+          - exec
+          - "{{ kube_do_etcd_pod.stdout | trim }}"
+          - --
+          - /usr/local/bin/etcdctl
+          - --endpoints=https://127.0.0.1:2379
+          - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+          - --cert=/etc/kubernetes/pki/etcd/server.crt
+          - --key=/etc/kubernetes/pki/etcd/server.key
+          - member
+          - list
+          - --write-out=json
+      register: kube_do_etcd_member_list
+      changed_when: false
+
+    - name: Assert every control-plane node is an etcd member
+      ansible.builtin.assert:
+        that:
+          - (kube_do_etcd_member_list.stdout | from_json).members | length == groups['control_plane'] | length
+        fail_msg: >-
+          etcd reports {{ (kube_do_etcd_member_list.stdout | from_json).members | length }}
+          members while the inventory contains {{ groups['control_plane'] | length }}
+          control-plane nodes
+
+    - name: Wait for new control-plane nodes to become Ready
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - wait
+          - --for=condition=Ready
+          - "node/{{ item }}"
+          - "--timeout={{ kube_do_add_control_plane_ready_timeout }}"
+      loop: "{{ groups['new_control_plane'] }}"
+      changed_when: false
+
+    - name: Verify every etcd member is healthy after control-plane scale-out
+      ansible.builtin.include_tasks: tasks/etcd-endpoint-health.yml

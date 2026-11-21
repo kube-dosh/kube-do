@@ -56,7 +56,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/install \
 - `check` 默认为 `true`：安装前执行配置、资源和 Registry 预检。
 - 返回 `202 Accepted` 和任务对象。安装过程通过任务状态和日志查询。
 
-## 向已有集群新增 Worker
+## 向已有集群新增节点
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/nodes \
@@ -73,7 +73,64 @@ curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/nodes \
 
 daemon 会生成只包含新 Worker 的 `new_workers` Inventory，执行 `ansible/add-worker.yml`：从现有第一个控制平面节点生成 join command，准备新节点，执行 `kubeadm join`，最后等待节点 Ready。成功后新节点才会写入持久化的集群配置。
 
-当前仅支持 Worker 增量纳管。控制平面扩容涉及 etcd 成员、证书和 HA 配置，尚未开放 API。
+控制平面扩容使用同一个接口，把 `role` 改为 `control-plane`：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/nodes \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"role":"control-plane","nodes":[{"name":"cp-4","address":"10.0.0.14"}]}'
+```
+
+控制平面扩容会先创建 etcd 快照，重新上传证书密钥，加入新节点，校验 etcd 成员数，然后逐节点刷新所有控制平面的 HAProxy/keepalived 配置。成功后新控制平面节点才会写入 `cluster.yaml`。
+
+## 移除节点
+
+```bash
+curl -sS -X DELETE \
+  "http://127.0.0.1:8090/api/v1/clusters/demo/nodes/worker-4?confirm=true" \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN"
+```
+
+所有节点移除都必须显式传 `confirm=true`。Worker 会被 drain、删除 Node 对象并执行 `kubeadm reset`。控制平面节点还会先移除 etcd 成员，并在存活控制平面节点上滚动 HA 配置；最后一个控制平面节点会被拒绝删除。任务成功后才从持久化配置中移除该节点。
+
+## 集群卸载
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/uninstall \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"confirm":true,"keepCluster":false}'
+```
+
+`confirm` 必须为 `true`。卸载会停止 kubelet 与 HA 容器、执行 `kubeadm reset`，并删除 `/etc/kubernetes`、`/var/lib/kubelet`、控制平面 `/var/lib/etcd` 等集群状态。Registry 数据、资源缓存与 etcd 快照默认保留。`keepCluster` 为 `true` 时保留 daemon 中的集群定义，便于之后重新安装。
+
+## 原地升级与回滚
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/upgrade \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"targetBuild":"v1.37.0-kube-do.1","prepare":true,"check":true}'
+```
+
+升级只接受补丁版本或单次一个 Minor 版本，拒绝降级和跨多个 Minor。daemon 会先准备目标 Build 的二进制与镜像，创建升级前 etcd 快照，然后在每个节点写入 `/var/backups/kube-do/rollback/<old-build>.tar.gz`。控制平面和 Worker 按一次一个节点升级，最后刷新 Cilium 并验证；成功后 `cluster.yaml` 的 `build` 才会更新。
+
+回滚是恢复到旧 Build 配置与升级前 etcd 快照的状态回滚，不是 `kubeadm` 降级：
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/upgrade/rollback \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetBuild":"v1.36.5-kube-do.1",
+    "snapshotPath":"/var/lib/kube-do/daemon/backups/demo/demo-etcd-20261115T120000Z.db",
+    "confirm":true,
+    "prepare":true
+  }'
+```
+
+回滚会先创建当前状态的安全快照，再恢复旧配置和旧二进制，并将升级前快照恢复到所有控制平面 etcd 成员。快照之后写入的业务数据不会保留。
 
 ## etcd 备份
 
@@ -115,6 +172,26 @@ kube-do etcd backup \
   --backup-dir ./etcd-backups \
   --retain 10 \
   --json
+```
+
+## etcd 恢复
+
+```bash
+curl -sS -X POST http://127.0.0.1:8090/api/v1/clusters/demo/etcd-restores \
+  -H "Authorization: Bearer $KUBE_DO_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "snapshotPath":"/var/lib/kube-do/daemon/backups/demo/demo-etcd-20261115T120000Z.db",
+    "targetNode":"cp-1",
+    "confirm":true
+  }'
+```
+
+`snapshotPath` 必须是安装机上的普通文件，`confirm` 必须为 `true`。恢复前 daemon 会先创建当前集群的安全快照。恢复流程会停止所有控制平面 kubelet、保留旧 `/var/lib/etcd` 目录、使用 etcd 镜像中的 `etcdutl` 将快照恢复到每个 etcd 成员，并优先启动 `targetNode`（默认第一个控制平面节点），随后启动其余控制平面与 Worker。API 恢复后，流程会逐个重建控制平面静态 API/控制器容器并重启 kubelet，以刷新 Node 授权与 API watch cache；随后重建 Cilium 数据面并滚动重启 CoreDNS/Hubble Relay，最后等待 API、节点和 etcd 全部就绪。对应 CLI 命令为：
+
+```bash
+kube-do etcd restore --config cluster.yaml \
+  --snapshot ./etcd-backups/demo-etcd-20261115T120000Z.db --yes
 ```
 
 ## 证书检查
@@ -205,8 +282,9 @@ curl -sS http://127.0.0.1:8090/api/v1/jobs/<job-id>/logs \
 
 ## 当前边界
 
-- 不提供集群卸载、节点删除、原地升级或控制平面扩容 API。
-- 不提供 etcd 自动恢复、证书自动轮换或控制平面静态 Pod 自动重启 API。
+- 生命周期操作已在 Debian 13 `amd64` 上完成多节点端到端验证；RHEL 系发行版仍待同等验证。
+- 回滚与 etcd 恢复会丢失所选快照之后写入的数据。
+- 不提供证书自动轮换或独立的控制平面静态 Pod 重启 API；etcd 恢复与回滚流程内部会自动重启这些组件。
 - daemon 重启后会保留任务历史，但不会恢复正在执行的任务，也不会自动重试中断任务。
 - 任务取消依赖 `ansible-playbook` 进程响应上下文取消；已完成的远程操作不会回滚。
 - API 默认不做 TLS 终止。跨主机访问时建议放在反向代理后，或额外配置网络访问控制。

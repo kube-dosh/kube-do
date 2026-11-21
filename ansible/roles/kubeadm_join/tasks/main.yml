@@ -4,6 +4,23 @@
     path: /etc/kubernetes/kubelet.conf
   register: kube_do_kubelet_conf
 
+- name: Check for an incomplete previous join
+  ansible.builtin.stat:
+    path: /etc/kubernetes/bootstrap-kubelet.conf
+  register: kube_do_bootstrap_kubelet_conf
+
+- name: Reset an incomplete previous join before retrying
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubeadm
+      - reset
+      - --force
+      - --cri-socket
+      - unix:///run/containerd/containerd.sock
+  when:
+    - not kube_do_kubelet_conf.stat.exists
+    - kube_do_bootstrap_kubelet_conf.stat.exists
+
 - name: Assert that the first control-plane node published a join command
   ansible.builtin.assert:
     that:

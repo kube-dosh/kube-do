@@ -1,0 +1,147 @@
+---
+- name: Validate and stage the etcd snapshot on every control-plane node
+  hosts: control_plane
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    kube_do_etcd_restore_dir: /var/backups/kube-do/etcd-restore
+  tasks:
+    - name: Create the etcd restore staging directory
+      ansible.builtin.file:
+        path: "{{ kube_do_etcd_restore_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Copy the snapshot to the control-plane node
+      ansible.builtin.copy:
+        src: "{{ kube_do_restore_snapshot }}"
+        dest: "{{ kube_do_etcd_restore_dir }}/{{ kube_do_restore_snapshot | basename }}"
+        mode: '0600'
+
+    - name: Verify the staged snapshot size and checksum
+      ansible.builtin.stat:
+        path: "{{ kube_do_etcd_restore_dir }}/{{ kube_do_restore_snapshot | basename }}"
+        checksum_algorithm: sha256
+      register: kube_do_restore_snapshot_stat
+
+    - name: Assert the staged snapshot matches the requested snapshot
+      ansible.builtin.assert:
+        that:
+          - kube_do_restore_snapshot_stat.stat.size == (kube_do_restore_snapshot_size | int)
+          - kube_do_restore_snapshot_stat.stat.checksum | lower == kube_do_restore_snapshot_sha256 | lower
+        fail_msg: >-
+          staged etcd snapshot mismatch on {{ inventory_hostname }}:
+          size={{ kube_do_restore_snapshot_stat.stat.size }},
+          sha256={{ kube_do_restore_snapshot_stat.stat.checksum }}
+
+    - name: Restore the etcd data directory
+      ansible.builtin.include_tasks: tasks/etcd-restore-data.yml
+      vars:
+        kube_do_etcd_restore_snapshot: "{{ kube_do_etcd_restore_dir }}/{{ kube_do_restore_snapshot | basename }}"
+        kube_do_etcd_restore_initial_cluster: "{{ kube_do_restore_initial_cluster }}"
+        kube_do_etcd_restore_timestamp: "{{ kube_do_restore_timestamp }}"
+
+- name: Start the primary control-plane node first
+  hosts: control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Start kubelet on the primary control-plane node
+      ansible.builtin.systemd:
+        name: kubelet
+        state: started
+        enabled: true
+
+- name: Start the remaining control-plane nodes
+  hosts: control_plane
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Start kubelet on the control-plane node
+      ansible.builtin.systemd:
+        name: kubelet
+        state: started
+        enabled: true
+
+- name: Wait for the restored control plane API
+  hosts: control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Wait for the Kubernetes API to respond after restore
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - --request-timeout=10s
+          - get
+          - --raw=/readyz
+      register: kube_do_restore_readyz
+      changed_when: false
+      retries: 120
+      delay: 5
+      until: kube_do_restore_readyz.rc == 0
+
+- name: Restart the restored control-plane static containers
+  hosts: control_plane
+  serial: 1
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Restart Kubernetes control-plane containers
+      ansible.builtin.include_tasks: tasks/restart-restored-control-plane.yml
+
+- name: Reinitialize kubelet on the control-plane nodes
+  hosts: control_plane
+  serial: 1
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Restart kubelet after the restored API is ready
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+      failed_when: false
+
+- name: Reconcile add-ons and verify the restored cluster
+  hosts: control_plane[0]
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Rebuild Cilium and restart cluster add-ons
+      ansible.builtin.include_tasks: tasks/reconcile-restored-addons.yml
+
+    - name: Wait for all nodes after restore
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - wait
+          - --for=condition=Ready
+          - nodes
+          - --all
+          - "--timeout={{ kube_do_node_ready_timeout }}"
+      changed_when: false
+
+    - name: Verify every etcd member is healthy after restore
+      ansible.builtin.include_tasks: tasks/etcd-endpoint-health.yml
+
+    - name: Show restored cluster status
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - get
+          - nodes
+          - -o
+          - wide
+      register: kube_do_restore_nodes
+      changed_when: false
+
+    - name: Print restored cluster status
+      ansible.builtin.debug:
+        var: kube_do_restore_nodes.stdout_lines

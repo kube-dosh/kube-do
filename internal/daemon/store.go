@@ -110,6 +110,18 @@ func (s *Store) List() ([]*cluster.Config, error) {
 	return out, nil
 }
 
+// Delete removes the stored ClusterConfig. It does not touch cluster nodes.
+func (s *Store) Delete(name string) error {
+	path, err := s.clusterPath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("delete cluster config: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) clusterPath(name string) (string, error) {
 	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
 		return "", fmt.Errorf("invalid cluster name %q", name)

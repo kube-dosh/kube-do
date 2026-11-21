@@ -37,8 +37,13 @@
       - rollout
       - status
       - deployment/coredns
+      - --watch=false
       - "--timeout={{ kube_do_coredns_rollout_timeout }}"
+  register: kube_do_coredns_rollout
   changed_when: false
+  retries: "{{ kube_do_coredns_rollout_retries }}"
+  delay: "{{ kube_do_coredns_rollout_delay }}"
+  until: kube_do_coredns_rollout.rc == 0
 
 - name: Wait for the Hubble relay
   ansible.builtin.command:
@@ -51,8 +56,13 @@
       - rollout
       - status
       - deployment/hubble-relay
+      - --watch=false
       - "--timeout={{ kube_do_hubble_rollout_timeout }}"
+  register: kube_do_hubble_rollout
   changed_when: false
+  retries: "{{ kube_do_hubble_rollout_retries }}"
+  delay: "{{ kube_do_hubble_rollout_delay }}"
+  until: kube_do_hubble_rollout.rc == 0
 
 - name: Verify kube-proxy is absent
   ansible.builtin.command:

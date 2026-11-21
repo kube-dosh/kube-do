@@ -14,7 +14,7 @@ kube-do 是一个面向 RHEL 系与 Debian 系 Linux 的离线（air-gapped）Ku
 kube-do 适用于隔离数据中心、合规环境、边缘站点，以及强调可重复性和依赖可控性的实验平台。
 
 > [!WARNING]
-> kube-do 仍在积极开发中，**尚未达到生产可用标准**。当前版本支持全新安装，以及通过 daemon API 增量新增 Worker；原地升级、控制平面扩容、节点移除、Registry 认证和长期生产环境验证不在当前范围内。请先在可丢弃或非关键环境中评估。
+> kube-do 仍在积极开发中，**尚未达到生产可用标准**。当前版本已支持全新安装、Worker 与控制平面扩容、节点移除、集群卸载、原地升级/回滚和 etcd 恢复；所有破坏性操作都要求显式确认并默认先创建 etcd 快照，但仍需在可丢弃环境中完成验证。请先在非关键环境中评估。
 
 ## 目录
 
@@ -359,8 +359,15 @@ Registry 不提供认证或 RBAC。任何能访问 `5000` 端口的主体都可�
 | `kube-do serve` | 通过 HTTP 提供缓存资源 |
 | `kube-do render` | 生成 Ansible Inventory 与 Group Variables |
 | `kube-do install` | 执行 Ansible 安装 |
-| `kube-do daemon` | 启动集群管理 HTTP API，支持异步安装、Worker 增量纳管、备份、证书检查、任务取消与持久化任务历史 |
+| `kube-do daemon` | 启动集群管理 HTTP API，支持异步生命周期操作、备份、证书检查、任务取消与持久化任务历史 |
+| `kube-do node add` | 新增 Worker 或控制平面节点；控制平面扩容前自动创建 etcd 快照 |
+| `kube-do node remove` | 驱逐、重置并移除 Worker 或控制平面节点 |
+| `kube-do cluster uninstall` | 重置所有节点上的 Kubernetes 状态，同时保留 Registry 数据与快照 |
+| `kube-do upgrade plan` | 校验 Build 与 Kubernetes 版本的原地升级路径 |
+| `kube-do upgrade apply` | 逐节点升级控制平面与 Worker，并创建升级前快照 |
+| `kube-do upgrade rollback` | 恢复旧 Build 配置及其升级前 etcd 快照 |
 | `kube-do etcd backup` | 从第一个控制平面节点保存 etcd 快照并拉取到安装机 |
+| `kube-do etcd restore` | 从已校验快照恢复所有控制平面 etcd 成员 |
 | `kube-do certs check` | 检查所有控制平面节点的 Kubernetes 证书有效期 |
 | `kube-do manifest bump` | 按显式组件版本生成新的 Resource Manifest |
 
@@ -382,6 +389,8 @@ Registry 不提供认证或 RBAC。任何能访问 `5000` 端口的主体都可�
 | `verify` | 等待节点、Cilium、CoreDNS 与 Hubble Relay 就绪 |
 
 Cilium 阶段使用 `helm --atomic --wait`，并在重试前清理 pending 或 failed 的 Helm Release。安装器不会自动重启节点；SELinux 的持久化配置可能需要后续维护窗口重启才能完全生效。
+
+生命周期操作使用独立 Playbook：`add-control-plane.yml`、`remove-node.yml`、`upgrade.yml`、`rollback.yml`、`ops-etcd-restore.yml` 与 `uninstall.yml`。控制平面扩容和节点移除会先创建 etcd 快照，再逐节点滚动 HAProxy/keepalived 配置，只有成功后才写回 `cluster.yaml`。升级允许补丁版本或单次一个 Minor 版本，逐节点执行，并在 `/var/backups/kube-do/rollback/` 保留回滚归档。回滚与 etcd 恢复不会保留所选快照之后写入的业务数据。
 
 ## Build 与发布产物
 
@@ -473,6 +482,7 @@ sha256sum -c checksums.txt
 - Debian 13 `amd64` 相同拓扑的全新离线安装。
 - Debian 13 `amd64` 上固定 digest 的预构建 HAProxy 与 keepalived 镜像搬运：校验源与目标 digest 一致，HA 容器正常启动，并通过 VIP API 就绪检查，全程不编译本地 HA 产物。
 - 两个全新安装上的 daemon API 正常路径 E2E：鉴权、集群注册、重复注册与不支持请求、同集群任务冲突、带 `etcdutl` 校验和 SHA-256 核对的 etcd 备份、结构化证书检查、任务取消语义，以及 daemon 重启后的任务历史恢复。
+- Debian 13 `amd64` 多节点生命周期演练：全新安装、etcd 备份、通过 API 移除 Worker、从快照恢复 etcd、将节点扩容为控制平面、`v1.36.5` 到 `v1.36.6` 原地升级与回滚、再次 etcd 恢复，以及最终通过 API 卸载集群。
 
 尚未验证：
 
@@ -480,7 +490,7 @@ sha256sum -c checksums.txt
 - Ubuntu 22.04/24.04 与所有 `arm64` 目标的端到端安装。
 - 任意安装机与目标机 glibc ABI 组合。
 - 长期稳定性、突然断电恢复，以及所有安装中断场景的自动续跑。
-- etcd 恢复演练、证书轮换、升级、回滚、控制平面扩容、节点移除、网络分区，以及多发行版/多架构 API E2E。
+- RHEL 系发行版上的完整生命周期演练。当前多节点生命周期验证集中在 Debian 13 `amd64`。
 
 自动化测试覆盖配置解析、Manifest 校验、归档解压安全、下载、Registry 操作、渲染、安装命令构造、任务生命周期与持久化、证书输出解析和备份元数据校验。真实 API 验证脚本见 [docs/e2e.md](docs/e2e.md)。
 
@@ -500,9 +510,9 @@ kube-do 面向受控的隔离环境。使用前请确认以下运维特征：
 
 ## 已知限制
 
-- 不支持 Kubernetes 原地升级或 Build 回滚。
-- 不支持控制平面扩容、节点移除或集群卸载。
-- 支持 etcd 备份和证书检查，但尚不自动执行 etcd 恢复或证书轮换。
+- 生命周期流程已完成 Debian 13 `amd64` 多节点端到端验证，但尚未在 RHEL 系发行版上完成同等验证。
+- 回滚是恢复到升级前快照和旧 Build 的状态回滚，无法保留快照之后写入的数据。
+- 证书目前只支持检查，尚不支持自动轮换。
 - daemon 重启后不会继续执行任务；运行中的任务会标记为中断。
 - 由 `kubeadm join --control-plane` 加入的控制平面节点可能缺少部分证书，当前只报告缺失，不自动判定为异常。
 - Registry 不支持认证、RBAC、Web UI 或复制。

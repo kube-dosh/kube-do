@@ -1,0 +1,47 @@
+---
+- name: Find the local etcd static pod
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - get
+      - pods
+      - --selector=component=etcd,tier=control-plane
+      - --output=jsonpath={.items[0].metadata.name}
+  register: kube_do_etcd_health_pod
+  changed_when: false
+  retries: 30
+  delay: 5
+  until: kube_do_etcd_health_pod.rc == 0 and kube_do_etcd_health_pod.stdout | trim != ''
+
+- name: Verify etcd cluster endpoint health
+  ansible.builtin.command:
+    argv:
+      - /usr/local/bin/kubectl
+      - --kubeconfig
+      - /etc/kubernetes/admin.conf
+      - --namespace
+      - kube-system
+      - exec
+      - "{{ kube_do_etcd_health_pod.stdout | trim }}"
+      - --
+      - /usr/local/bin/etcdctl
+      - --endpoints=https://127.0.0.1:2379
+      - --cacert=/etc/kubernetes/pki/etcd/ca.crt
+      - --cert=/etc/kubernetes/pki/etcd/server.crt
+      - --key=/etc/kubernetes/pki/etcd/server.key
+      - endpoint
+      - health
+      - --cluster
+  register: kube_do_etcd_endpoint_health
+  changed_when: false
+  retries: 60
+  delay: 5
+  until: kube_do_etcd_endpoint_health.rc == 0
+
+- name: Show etcd endpoint health
+  ansible.builtin.debug:
+    var: kube_do_etcd_endpoint_health.stdout_lines
